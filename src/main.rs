@@ -7,16 +7,16 @@ mod errors;
 mod git_commands;
 mod types;
 
-use std::env;
-
 use crate::ai_explainer::{explain_git_command, explain_git_command_output};
 use crate::cli::{GitieArgs, GitieSubCommand, args_contain_ai, args_contain_help};
 use crate::commit_commands::handle_commit;
 use crate::config::AppConfig;
 use crate::errors::{AppError, GitError};
-use crate::git_commands::{execute_git_command_and_capture_output, passthrough_to_git};
+use crate::git_commands::{
+    execute_git_command_and_capture_output, is_git_available, is_in_git_repository,
+    passthrough_to_git,
+};
 use clap::Parser;
-use tracing::{error, info};
 
 fn main() {
     tracing_subscriber::fmt()
@@ -46,23 +46,41 @@ fn main() {
 
 async fn run_app() -> Result<(), AppError> {
     let config = AppConfig::load()?;
-    let current_dir = env::current_dir()
-        .map_err(|e| AppError::IO("Failed to get current directory".to_string(), e))?;
-    if !current_dir.join(".git").exists() {
-        error!("Error: Not a git repository (or any of the parent directories).");
+
+    // First check if git is available
+    if !is_git_available()? {
+        tracing::error!("Error: Git is not available on this system.");
+        return Err(AppError::IO(
+            "Git command not found or not executable".to_string(),
+            std::io::Error::new(std::io::ErrorKind::NotFound, "Git not available"),
+        ));
+    }
+
+    // Then check if we're in a git repository
+    if !is_in_git_repository()? {
+        tracing::error!("Error: Not a git repository (or any of the parent directories).");
         return Err(GitError::NotARepository.into());
     }
 
     let raw_cli_args: Vec<String> = std::env::args().skip(1).collect();
 
-    // 1. 首先检查命令参数中是否包含 help 参数
+    // 1. Check for help flags first
     if args_contain_help(&raw_cli_args) {
         if args_contain_ai(&raw_cli_args) {
-            info!("Help flag detected with --ai. Explaining Git command output...");
+            tracing::info!("Help flag detected with --ai. Explaining Git command output...");
             let mut command_to_execute_for_help = raw_cli_args.clone();
             command_to_execute_for_help.retain(|arg| arg != "--ai");
+            tracing::debug!(
+                "Command about to execute is: {}",
+                &command_to_execute_for_help.join(" ")
+            );
 
-            // 如果待执行指令为空，譬如 (`gitie --ai --help` -> `[]` after retain)
+            // After removing the --ai flag:
+            // - For `gitie --ai --help` -> `--help` remains in the command
+            // - For `gitie --ai commit --help` -> `commit --help` remains
+            // The help flags (-h/--help) are NOT removed by the retain operation,
+            // only the --ai flag is removed
+            // Since help flags always remain, we'll never have an empty command
             let cmd_output = execute_git_command_and_capture_output(&command_to_execute_for_help)?;
             let mut text_to_explain = cmd_output.stdout;
             if !cmd_output.status.success() && !cmd_output.stderr.is_empty() {
@@ -101,7 +119,7 @@ async fn run_app() -> Result<(), AppError> {
                 // Failed to parse as a specific gitie subcommand.
                 // This could be a global --ai explantion request fo a generic command(e.g. `gitie --ai status`).
                 // or just a command to passthroug (e.g. `gitie status`).
-                if raw_cli_args.iter().any(|arg| arg == "--ai") {
+                if args_contain_ai(&raw_cli_args) {
                     tracing::info!(
                         "Not a specific git-enhancer subcommand, but --ai flag detected. Explaining Git command..."
                     );
@@ -128,6 +146,13 @@ async fn run_app() -> Result<(), AppError> {
                         );
                         passthrough_to_git(&raw_cli_args)?;
                     }
+                } else {
+                    // No --ai, not a known gitie subcommand. Pass through to git.
+                    // e.g., `gitie status`
+                    tracing::info!(
+                        "Not a recognized gitie subcommand and no --ai. Passing to git."
+                    );
+                    passthrough_to_git(&raw_cli_args)?;
                 }
             }
         }
