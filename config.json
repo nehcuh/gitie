@@ -1,6 +1,0 @@
-{
-  "api_url": "https://api1.oaipro.com/v1/chat/completions",
-  "model_name": "gpt-4.1",
-  "temperature": 0.7,
-  "api_key": "sk-Y0mUL9ZLyqakkTlfgOjhsy1nTDZJCEeP2ZWk4AWw0pJSBxqY"
-}

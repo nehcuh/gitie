@@ -1,6 +1,0 @@
-{
-  "api_url": "http://localhost:11434/v1/chat/completions",
-  "model_name": "qwen3:32b-q8_0",
-  "temperature": 0.7,
-  "api_key": "YOUR_API_KEY_IF_NEEDED"
-}
