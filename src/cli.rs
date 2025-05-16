@@ -3,7 +3,7 @@ use clap::Parser;
 /// Defines the command-line arguments specific to `gitie`'s own subcommands.
 /// This is typically used after determining that the invocation is not a global AI explanation request.
 #[derive(Parser, Debug)]
-#[clap(author="Huchen", version="0.1.0", about="Git with AI support", long_about=None, name="gitie-subcommand-parser")]
+#[clap(author="Huchen", version="0.1.0", about="Git with AI support (enabled by default)", long_about=None, name="gitie-subcommand-parser")]
 pub struct GitieArgs {
     #[clap(subcommand)]
     pub command: GitieSubCommand,
@@ -23,8 +23,13 @@ pub enum GitieSubCommand {
 #[derive(Parser, Debug, Clone)]
 pub struct CommitArgs {
     /// Use AI to generate the commit message (specific to the `commit` subcommand).
+    /// Note: AI is enabled by default, this flag is kept for backward compatibility.
     #[clap(long)]
     pub ai: bool,
+
+    /// Disable AI functionality and use standard git behavior.
+    #[clap(long)]
+    pub noai: bool,
 
     /// Automatically stage all tracked, modified files before commit (like git commit -a).
     #[clap(short = 'a', long = "all")]
@@ -48,4 +53,21 @@ pub fn args_contain_help(args: &[String]) -> bool {
 #[inline]
 pub fn args_contain_ai(args: &[String]) -> bool {
     args.iter().any(|arg| arg == "--ai")
+}
+
+/// Checks if a slice of string arguments contains "--noai".
+#[inline]
+pub fn args_contain_noai(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--noai")
+}
+
+/// Determines if AI functionality should be used based on command line arguments.
+/// Returns true if AI should be used (default), false if it should be disabled.
+/// Logic:
+/// - If --noai is present, disable AI (return false), even if --ai is also present
+/// - Otherwise, enable AI (return true), regardless of whether --ai is present or not
+/// - The --ai flag is kept for backward compatibility, but is not needed as AI is enabled by default
+#[inline]
+pub fn should_use_ai(args: &[String]) -> bool {
+    !args_contain_noai(args)
 }

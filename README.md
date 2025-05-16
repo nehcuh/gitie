@@ -66,26 +66,28 @@
 
 ## Usage
 
-`gitie` intelligently interprets your commands based on the arguments provided, especially the `--ai`, `-h`, and `--help` flags. Here's a breakdown of how commands are processed:
+`gitie` intelligently interprets your commands based on the arguments provided. AI features are **enabled by default**, and you can use the `--noai` flag to disable them. Here's a breakdown of how commands are processed:
 
 **Priority 1: Help Requests (`-h` or `--help`)**
 
 If your command includes a help flag (`-h` or `--help`):
 
-*   **With `--ai`**: `gitie` fetches the standard Git help text for the command (after removing `--ai` from the arguments passed to `git`) and then provides an AI-generated explanation of that help text. The `--ai` flag can appear anywhere in the arguments.
+*   **Default (AI enabled)**: `gitie` fetches the standard Git help text for the command and then provides an AI-generated explanation of that help text.
     ```bash
     # AI explains the help page for 'git commit'
-    gitie commit --help --ai
-    gitie --ai commit --help 
-
+    gitie commit --help
+    
     # AI explains the help page for 'git status --short'
-    gitie status --short --help --ai
+    gitie status --short --help
     ```
-*   **Without `--ai`**: The command is passed directly to Git to display its standard help message.
+    
+*   **With `--noai`**: The command is passed directly to Git to display its standard help message without AI explanation.
     ```bash
-    gitie commit --help  # Shows standard 'git commit --help'
-    gitie status -s --help # Shows standard 'git status -s --help'
+    gitie commit --help --noai  # Shows standard 'git commit --help'
+    gitie status -s --help --noai # Shows standard 'git status -s --help'
     ```
+
+*   **Note**: The `--ai` flag still works for backward compatibility but is no longer needed as AI is enabled by default.
 
 **Priority 2: `gitie` Specific Subcommands (No Help Flag)**
 
@@ -93,66 +95,56 @@ If no help flag is present, `gitie` attempts to parse the command as one of its 
 
 *   **`gitie commit` Subcommand:**
     This is the primary way to interact with `git-enhancer`'s own functionalities.
-    *   **AI Commit Message Generation (`commit --ai`)**: This is the core AI feature for the `commit` subcommand. It analyzes your changes and generates a commit message.
+    *   **AI Commit Message Generation (default behavior)**: The core AI feature for the `commit` subcommand analyzes your changes and generates a commit message automatically.
         ```bash
         # If you've already staged your files:
         git add .
-        gitie commit --ai 
+        gitie commit
     
         # Auto-stage all tracked, modified files and generate AI commit message (like git commit -a):
-        gitie commit --ai -a
+        gitie commit -a
         # or
-        gitie commit --ai --all
+        gitie commit --all
     
         # Generate AI commit message and GPG-sign the commit
-        gitie commit --ai -S
+        gitie commit -S
     
         # Combine auto-staging with other options:
-        gitie commit --ai -aS
+        gitie commit -aS
         ```
-    *   **Standard Commit**: If `--ai` is not used for message generation within the `commit` subcommand, `gitie` behaves like the standard `git commit`, passing through arguments.
+    *   **Standard Commit**: Use the `--noai` flag to disable AI message generation and behave like the standard `git commit`.
         ```bash
-        gitie commit -m "My manual commit message"
-        gitie commit --amend # Opens editor to amend previous commit
+        gitie commit --noai -m "My manual commit message"
+        gitie commit --noai --amend # Opens editor to amend previous commit
         ```
 
 **Priority 3: Global AI Explanation for Generic Git Commands (No Help Flag, and Not Parsed as a `gitie` Specific Subcommand)**
 
-If the command doesn't include a help flag, and `gitie` fails to parse it as one of its own specific subcommands (e.g., `gitie status` or `gitie --ai status`, because `status` is not a `gitie` subcommand):
+If the command doesn't include a help flag, and `gitie` fails to parse it as one of its own specific subcommands (e.g., `gitie status`, because `status` is not a `gitie` subcommand):
 
-*   **If `--ai` is present**: `gitie` will provide an AI-generated explanation of the Git command. It first removes all occurrences of `--ai` from the arguments and then asks the AI to explain the remaining command.
+*   **Default (AI enabled)**: `gitie` will provide an AI-generated explanation of the Git command.
     ```bash
     # AI explains what 'git status -s' does
-    # (raw_cli_args: ["--ai", "status", "-s"] -> AI explains "git status -s")
-    gitie --ai status -s
+    gitie status -s
 
     # AI explains what 'git log --oneline -n 5' does
-    # (raw_cli_args: ["--ai", "log", "--oneline", "-n", "5"] -> AI explains "git log --oneline -n 5")
-    gitie --ai log --oneline -n 5
+    gitie log --oneline -n 5
 
     # AI explains what 'git commit -m "message"' does
-    # This is because `GitEnhancerArgs` parsing for ["--ai", "commit", ...] would fail due to the initial "--ai",
-    # thus falling into this global AI explanation logic.
-    # (raw_cli_args: ["--ai", "commit", "-m", "A message"] -> AI explains "git commit -m \"A message\"")
-    gitie --ai commit -m "A standard commit message"
-
-    # AI explains what 'git commit' does
-    # (raw_cli_args: ["--ai", "commit", "--ai"] -> `GitEnhancerArgs` parsing fails.
-    # Global --ai logic applies. After removing both "--ai"s, AI explains "git commit".)
-    gitie --ai commit --ai 
+    gitie commit -m "A standard commit message"
     ```
-*   **If only `--ai` is provided** (e.g., `gitie --ai` with no other arguments): It defaults to explaining `git --help`.
+*   **If no command is provided** (e.g., `gitie` with no other arguments): It defaults to explaining `git --help`.
     ```bash
-    gitie --ai # AI explains "git --help"
+    gitie # AI explains "git --help"
     ```
 
-**Priority 4: Passthrough to Git (No Help Flag, Not a `gitie` Subcommand, No Global `--ai`)**
+**Priority 4: Passthrough to Git (With `--noai` Flag)**
 
-If the command doesn't include a help flag, is not recognized as a `gitie` subcommand, and does not include a global `--ai` flag for explanation, it's passed directly to your system's `git` installation.
+If the command includes the `--noai` flag, it's passed directly to your system's `git` installation (after removing the `--noai` flag).
 ```bash
-gitie status -s  # Executes 'git status -s'
-gitie push origin main # Executes 'git push origin main'
-gitie branch my-new-feature # Executes 'git branch my-new-feature'
+gitie --noai status -s  # Executes 'git status -s'
+gitie --noai push origin main # Executes 'git push origin main'
+gitie --noai branch my-new-feature # Executes 'git branch my-new-feature'
 ```
 
 ### Logging
@@ -161,7 +153,7 @@ gitie branch my-new-feature # Executes 'git branch my-new-feature'
 
 Example:
 ```bash
-RUST_LOG=debug gitie commit --ai
+RUST_LOG=debug gitie commit
 ```
 
 ## Workflow Diagram (AI Commit)

@@ -8,7 +8,7 @@ mod git_commands;
 mod types;
 
 use crate::ai_explainer::{explain_git_command, explain_git_command_output};
-use crate::cli::{GitieArgs, GitieSubCommand, args_contain_ai, args_contain_help};
+use crate::cli::{GitieArgs, GitieSubCommand, args_contain_help, should_use_ai};
 use crate::commit_commands::handle_commit;
 use crate::config::AppConfig;
 use crate::errors::{AppError, GitError};
@@ -66,10 +66,10 @@ async fn run_app() -> Result<(), AppError> {
 
     // 1. Check for help flags first
     if args_contain_help(&raw_cli_args) {
-        if args_contain_ai(&raw_cli_args) {
-            tracing::info!("Help flag detected with --ai. Explaining Git command output...");
+        if should_use_ai(&raw_cli_args) {
+            tracing::info!("Help flag detected with AI enabled. Explaining Git command output...");
             let mut command_to_execute_for_help = raw_cli_args.clone();
-            command_to_execute_for_help.retain(|arg| arg != "--ai");
+            command_to_execute_for_help.retain(|arg| arg != "--ai" && arg != "--noai");
             tracing::debug!(
                 "Command about to execute is: {}",
                 &command_to_execute_for_help.join(" ")
@@ -92,9 +92,11 @@ async fn run_app() -> Result<(), AppError> {
                 Err(e) => return Err(AppError::AI(e)),
             }
         } else {
-            // No --ai, just passthrough the help request to git
-            tracing::info!("Help flag detected without --ai. Passing to git.");
-            passthrough_to_git(&raw_cli_args)?;
+            // --noai is present, just passthrough the help request to git
+            tracing::info!("Help flag detected with --noai. Passing to git.");
+            let mut filtered_args = raw_cli_args.clone();
+            filtered_args.retain(|arg| arg != "--noai");
+            passthrough_to_git(&filtered_args)?;
         }
     } else {
         // 2. Not a help request, try parsing as git-enhancer subcommand or global AI explanation
@@ -117,21 +119,21 @@ async fn run_app() -> Result<(), AppError> {
             }
             Err(_) => {
                 // Failed to parse as a specific gitie subcommand.
-                // This could be a global --ai explantion request fo a generic command(e.g. `gitie --ai status`).
-                // or just a command to passthroug (e.g. `gitie status`).
-                if args_contain_ai(&raw_cli_args) {
+                // This could be a generic command that should receive AI explanation by default,
+                // or a command to passthrough if --noai is specified
+                if should_use_ai(&raw_cli_args) {
                     tracing::info!(
-                        "Not a specific git-enhancer subcommand, but --ai flag detected. Explaining Git command..."
+                        "Not a specific git-enhancer subcommand, providing AI explanation (default behavior)..."
                     );
 
                     let mut command_to_explain = raw_cli_args.clone();
-                    command_to_explain.retain(|arg| arg != "--ai"); // Remove all occurrences of --ai
+                    command_to_explain.retain(|arg| arg != "--ai"); // Remove all occurrences of --ai for backward compatibility
 
                     if command_to_explain.is_empty() {
-                        // Handle `gitie --ai` (with no actual command after removing --ai)
+                        // Handle `gitie` with no actual command
                         // Default to explaining "git --help"
                         tracing::debug!(
-                            "No specific command with global --ai, explaining 'git --help'."
+                            "No specific command, explaining 'git --help' by default."
                         );
                         command_to_explain.push("--help".to_string());
                         match explain_git_command(&config, &command_to_explain).await {
@@ -139,20 +141,20 @@ async fn run_app() -> Result<(), AppError> {
                             Err(e) => return Err(AppError::AI(e)),
                         }
                     } else {
-                        // No --ai, not a known subcommand. Pass through to git.
-                        // e.g. `gitie status`
-                        tracing::info!(
-                            "Not a recognized gitie subcommand and no --ai. Passing to git."
-                        );
-                        passthrough_to_git(&raw_cli_args)?;
+                        // With AI enabled (default), explain the command
+                        match explain_git_command(&config, &command_to_explain).await {
+                            Ok(explanation) => println!("{}", explanation),
+                            Err(e) => return Err(AppError::AI(e)),
+                        }
                     }
                 } else {
-                    // No --ai, not a known gitie subcommand. Pass through to git.
-                    // e.g., `gitie status`
+                    // --noai flag is present, pass through to git after removing the flag
                     tracing::info!(
-                        "Not a recognized gitie subcommand and no --ai. Passing to git."
+                        "--noai flag detected. Passing to git without AI functionality."
                     );
-                    passthrough_to_git(&raw_cli_args)?;
+                    let mut filtered_args = raw_cli_args.clone();
+                    filtered_args.retain(|arg| arg != "--noai");
+                    passthrough_to_git(&filtered_args)?;
                 }
             }
         }

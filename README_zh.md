@@ -66,26 +66,27 @@
 
 ## 使用方法
 
-`gitie` 根据提供的参数智能地解释您的命令，特别是 `--ai`、`-h` 和 `--help` 标志。以下是命令处理的详细说明：
+`gitie` 根据提供的参数智能地解释您的命令。AI 功能**默认启用**，您可以使用 `--noai` 标志禁用它们。以下是命令处理的详细说明：
 
 **优先级 1：帮助请求 (`-h` 或 `--help`)**
 
 如果您的命令包含帮助标志 (`-h` 或 `--help`)：
 
-*   **使用 `--ai`**：`gitie` 获取该命令的标准 Git 帮助文本（在传递给 `git` 的参数中移除 `--ai`），然后提供该帮助文本的 AI 生成解释。`--ai` 标志可以出现在参数的任何位置。
+*   **默认（AI 启用）**：`gitie` 获取该命令的标准 Git 帮助文本，然后提供该帮助文本的 AI 生成解释。
     ```bash
     # AI 解释 'git commit' 的帮助页面
-    gitie commit --help --ai
-    gitie --ai commit --ai -S
-
+    gitie commit --help
+    
     # AI 解释 'git status --short' 的帮助页面
-    gitie status -s --help --ai
+    gitie status -s --help
     ```
-*   **不使用 `--ai`**：命令直接传递给 Git 以显示其标准帮助信息。
+*   **使用 `--noai`**：命令直接传递给 Git 以显示其标准帮助信息，不提供 AI 解释。
     ```bash
-    gitie commit --help  # 显示标准的 'git commit --help'
-    gitie status -s --help # 显示标准的 'git status -s --help'
+    gitie commit --help --noai  # 显示标准的 'git commit --help'
+    gitie status -s --help --noai # 显示标准的 'git status -s --help'
     ```
+    
+*   **注意**：为了向后兼容，`--ai` 标志仍然有效，但由于 AI 现在默认启用，不再需要此标志。
 
 **优先级 2：`gitie` 特定子命令 (无帮助标志)**
 
@@ -93,66 +94,56 @@
 
 *   **`gitie commit` 子命令：**
     这是与 `gitie` 自身功能交互的主要方式。
-    *   **AI 提交信息生成 (`commit --ai`)**：这是 `commit` 子命令的核心 AI 功能。它分析您的更改并生成提交信息。
+    *   **AI 提交信息生成（默认行为）**：这是 `commit` 子命令的核心 AI 功能。它自动分析您的更改并生成提交信息。
         ```bash
         # 如果您已经暂存了文件：
         git add .
-        gitie commit --ai
+        gitie commit
     
         # 自动暂存所有已跟踪的修改文件并生成 AI 提交信息（类似于 git commit -a）：
-        gitie commit --ai -a
+        gitie commit -a
         # 或者
-        gitie commit --ai --all
+        gitie commit --all
     
         # 生成 AI 提交信息并使用 GPG 签名提交
-        gitie commit --ai -S
+        gitie commit -S
     
         # 组合自动暂存与其他选项：
-        gitie commit --ai -aS
+        gitie commit -aS
         ```
-    *   **标准提交**：如果在 `commit` 子命令中不使用 `--ai` 进行信息生成，`gitie` 的行为与标准的 `git commit` 一样，直接传递参数。
+    *   **标准提交**：使用 `--noai` 标志禁用 AI 信息生成，使其行为与标准的 `git commit` 一样。
         ```bash
-        gitie commit -m "我的手动提交信息"
-        gitie commit --amend # 打开编辑器修改上一次提交
+        gitie commit --noai -m "我的手动提交信息"
+        gitie commit --noai --amend # 打开编辑器修改上一次提交
         ```
 
 **优先级 3：通用 Git 命令的全局 AI 解释 (无帮助标志，且未解析为 `gitie` 特定子命令)**
 
-如果命令不包含帮助标志，且 `gitie` 无法将其解析为自身的特定子命令（例如，`gitie status` 或 `gitie --ai status`，因为 `status` 不是 `gitie` 的子命令）：
+如果命令不包含帮助标志，且 `gitie` 无法将其解析为自身的特定子命令（例如，`gitie status`，因为 `status` 不是 `gitie` 的子命令）：
 
-*   **如果存在 `--ai`**：`gitie` 将提供 Git 命令的 AI 生成解释。它首先从参数中移除所有 `--ai` 出现，然后让 AI 解释剩余的命令。
+*   **默认（AI 启用）**：`gitie` 将提供 Git 命令的 AI 生成解释。
     ```bash
     # AI 解释 'git status -s' 的功能
-    # (raw_cli_args: ["--ai", "status", "-s"] -> AI 解释 "git status -s")
-    gitie --ai status -s
+    gitie status -s
 
     # AI 解释 'git log --oneline -n 5' 的功能
-    # (raw_cli_args: ["--ai", "log", "--oneline", "-n", "5"] -> AI 解释 "git log --oneline -n 5")
-    gitie --ai log --oneline -n 5
+    gitie log --oneline -n 5
 
     # AI 解释 'git commit -m "message"' 的功能
-    # 这是因为对于 ["--ai", "commit", ...] 的 `GitEnhancerArgs` 解析会由于初始的 "--ai" 而失败，
-    # 因此落入全局 AI 解释逻辑。
-    # (raw_cli_args: ["--ai", "commit", "-m", "A message"] -> AI 解释 "git commit -m \"A message\"")
-    gitie --ai commit -m "一条标准的提交信息"
-
-    # AI 解释 'git commit' 的功能
-    # (raw_cli_args: ["--ai", "commit", "--ai"] -> `GitEnhancerArgs` 解析失败。
-    # 应用全局 --ai 逻辑。在移除两个 "--ai" 后，AI 解释 "git commit"。)
-    gitie --ai commit --ai 
+    gitie commit -m "一条标准的提交信息"
     ```
-*   **如果只提供 `--ai`**（例如，`gitie --ai` 没有其他参数）：默认解释 `git --help`。
+*   **如果没有提供命令**（例如，`gitie` 没有其他参数）：默认解释 `git --help`。
     ```bash
-    gitie --ai # AI 解释 "git --help"
+    gitie # AI 解释 "git --help"
     ```
 
-**优先级 4：传递给 Git (无帮助标志，非 `gitie` 子命令，无全局 `--ai`)**
+**优先级 4：传递给 Git (使用 `--noai` 标志)**
 
-如果命令不包含帮助标志，不被识别为 `gitie` 子命令，且不包含用于解释的全局 `--ai` 标志，它将直接传递给您系统的 `git` 安装。
+如果命令包含 `--noai` 标志，它将在移除 `--noai` 标志后直接传递给您系统的 `git` 安装。
 ```bash
-gitie status -s  # 执行 'git status -s'
-gitie push origin main # 执行 'git push origin main'
-gitie branch my-new-feature # 执行 'git branch my-new-feature'
+gitie --noai status -s  # 执行 'git status -s'
+gitie --noai push origin main # 执行 'git push origin main'
+gitie --noai branch my-new-feature # 执行 'git branch my-new-feature'
 ```
 
 ### 4. 日志记录
@@ -161,7 +152,7 @@ gitie branch my-new-feature # 执行 'git branch my-new-feature'
 
 示例：
 ```bash
-RUST_LOG=debug gitie commit --ai
+RUST_LOG=debug gitie commit
 ```
 
 ## 工作流图 (AI 提交)

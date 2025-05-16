@@ -83,8 +83,10 @@ pub async fn handle_commit_passthrough(
 ///
 /// * `Result<(), AppError>` - Success or an error
 pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), AppError> {
-    if args.ai {
-        tracing::info!("AI commit: Attempting to generate message...");
+    // Use AI by default unless --noai is specified
+    // Note: The --ai flag is kept for backward compatibility
+    if !args.noai {
+        tracing::info!("AI commit: Attempting to generate message (default behavior)...");
         // Handle auto-staging functionality
         if args.auto_stage {
             tracing::info!("Auto-staging tracked changes due to -a/--all flag");
@@ -115,6 +117,7 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
             if args.passthrough_args.contains(&"--allow-empty".to_string()) {
                 let passthrough_commit_args = CommitArgs {
                     ai: false,
+                    noai: true,
                     auto_stage: args.auto_stage,
                     message: None,
                     passthrough_args: args.passthrough_args.clone(),
@@ -206,7 +209,7 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
         }
         tracing::info!("Successfully committed with AI message.");
     } else {
-        return handle_commit_passthrough(args, "(standard commit)".to_string()).await;
+        return handle_commit_passthrough(args, "(standard commit with --noai)".to_string()).await;
     }
     Ok(())
 }
