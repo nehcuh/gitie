@@ -25,6 +25,7 @@ pub struct OpenAIChatRequest {
 }
 
 /// Represents a message in the OpenAI API response format
+#[allow(unused)]
 #[derive(Deserialize, Debug, Clone)]
 pub struct OpenAIChoice {
     pub index: u32,
@@ -33,6 +34,7 @@ pub struct OpenAIChoice {
 }
 
 // Represents token usage information in the OpenAI API response
+#[allow(unused)]
 #[derive(Deserialize, Debug, Clone)]
 pub struct OpenAIUsage {
     pub prompt_tokens: u32,
@@ -41,6 +43,7 @@ pub struct OpenAIUsage {
 }
 
 /// Represents the complete response structure from the OpenAI chat completion API
+#[allow(unused)]
 #[derive(Deserialize, Debug, Clone)]
 pub struct OpenAIChatCompletionResponse {
     pub id: String,

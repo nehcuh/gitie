@@ -25,11 +25,13 @@ impl CommandOutput {
     }
 
     /// Returns the exit code of the command, if available
+    #[allow(unused)]
     pub fn exit_code(&self) -> Option<i32> {
         self.status.code()
     }
 
     /// Returns the combined output (stdout + stderr) with stderr
+    #[allow(unused)]
     pub fn combined_output(&self) -> String {
         let mut output = self.stdout.clone();
 
@@ -51,16 +53,19 @@ impl CommandOutput {
     }
 
     /// Return true if both stdout and stderr are empty
+    #[allow(unused)]
     pub fn is_empty(&self) -> bool {
         self.stdout.is_empty() && self.stderr.is_empty()
     }
 
     /// Returns stdout as a vector of lines
+    #[allow(unused)]
     pub fn stdout_lines(&self) -> Vec<String> {
         self.stdout.lines().map(String::from).collect()
     }
 
     /// Returns a formatted display of the command output for user interaction
+    #[allow(unused)]
     pub fn formatted_display(&self) -> String {
         let mut display = String::new();
 
@@ -85,6 +90,7 @@ impl CommandOutput {
 }
 
 /// Represents a Git commit
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct GitCommit {
     /// The commit hash
@@ -104,6 +110,7 @@ pub struct GitCommit {
 }
 
 /// Represents the states of files in a Git repository
+#[allow(unused)]
 #[derive(Debug, Default)]
 pub struct GitStatus {
     /// Files that are staged for commit
@@ -120,6 +127,7 @@ pub struct GitStatus {
 }
 
 /// Represents the status of a specific file in Git
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct GitFileStatus {
     /// Path to the file
@@ -130,6 +138,7 @@ pub struct GitFileStatus {
 }
 
 /// Represents different Git operations
+#[allow(unused)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum GitOperation {
     /// Git commit operation
@@ -161,6 +170,7 @@ pub enum GitOperation {
 }
 
 /// Represents an entry in the Git config
+#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct GitConfigEntry {
     /// The section of the config (e.g. "user", "core")
@@ -174,6 +184,7 @@ pub struct GitConfigEntry {
 }
 
 /// Represents parsed Git configuration
+#[allow(unused)]
 #[derive(Debug, Default)]
 pub struct GitConfig {
     /// Map of section.key to value

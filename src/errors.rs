@@ -1,3 +1,4 @@
+#[allow(unused)]
 #[derive(Debug)]
 pub enum AppError {
     Config(ConfigError),
@@ -7,6 +8,7 @@ pub enum AppError {
     Generic(String),            // For simple string-based errors
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum ConfigError {
     FileRead(String, std::io::Error),
@@ -17,6 +19,7 @@ pub enum ConfigError {
     GitConfigRead(String, std::io::Error),
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum GitError {
     CommandFailed {
@@ -36,6 +39,7 @@ pub enum GitError {
     Other(String), // Generic Git error
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum AIError {
     RequestFailed(reqwest::Error),
@@ -48,9 +52,11 @@ pub enum AIError {
     ExplainerNetworkError(String), // For network errors from explainer not covered by reqwest::Error
 }
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum IOError {}
 
+#[allow(unused)]
 #[derive(Debug)]
 pub enum Generic {}
 
@@ -227,6 +233,7 @@ impl From<std::io::Error> for AppError {
 }
 
 // Helper for converting Command output to GitError when output is captured
+#[allow(unused)]
 pub fn map_command_error(
     cmd_str: &str,
     output: std::process::Output,     // Takes ownership

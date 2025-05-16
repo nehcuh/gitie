@@ -50,6 +50,7 @@ pub fn args_contain_help(args: &[String]) -> bool {
     args.iter().any(|arg| arg == "-h" || arg == "--help")
 }
 
+#[allow(unused)]
 #[inline]
 pub fn args_contain_ai(args: &[String]) -> bool {
     args.iter().any(|arg| arg == "--ai")
