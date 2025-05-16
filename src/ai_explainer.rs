@@ -196,6 +196,7 @@ mod tests {
         // Create test configuration
         let mut config = AppConfig {
             ai: AIConfig::default(),
+            tree_sitter: crate::config::TreeSitterConfig::default(),
             prompts: HashMap::new(),
         };
         config.prompts.insert("git-master".to_string(), "测试提示词".to_string());

@@ -81,7 +81,7 @@ pub fn should_use_ai(args: &[String]) -> bool {
 /// Checks if a slice of string arguments contains "--tree-sitter" or "-t".
 #[inline]
 pub fn args_contain_tree_sitter(args: &[String]) -> bool {
-    for (i, arg) in args.iter().enumerate() {
+    for (_i, arg) in args.iter().enumerate() {
         if arg == "--tree-sitter" || arg == "-t" {
             return true;
         }

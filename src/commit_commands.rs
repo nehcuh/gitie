@@ -4,7 +4,7 @@ use crate::{
     config::AppConfig,
     errors::{AIError, AppError, GitError},
     git_commands::map_output_to_git_command_error,
-    tree_sitter_analyzer::TreeSitterAnalyzer,
+    // tree_sitter_analyzer::TreeSitterAnalyzer, // Temporarily commented out
 };
 use std::process::Command as StdCommand;
 
@@ -74,6 +74,7 @@ pub async fn handle_commit_passthrough(
 }
 
 /// 判断是否应该使用Tree-sitter分析
+#[allow(dead_code)]
 fn should_use_tree_sitter(args: &CommitArgs, config: &AppConfig) -> bool {
     // 优先使用命令行参数
     if args.tree_sitter.is_some() {
@@ -91,6 +92,7 @@ fn should_use_tree_sitter(args: &CommitArgs, config: &AppConfig) -> bool {
 }
 
 /// 获取Tree-sitter分析级别
+#[allow(dead_code)]
 fn get_analysis_depth(args: &CommitArgs, config: &AppConfig) -> String {
     // 优先使用命令行参数
     if let Some(level) = &args.tree_sitter {
@@ -111,11 +113,16 @@ fn get_analysis_depth(args: &CommitArgs, config: &AppConfig) -> String {
 }
 
 /// 使用Tree-sitter生成增强提示
+#[allow(dead_code)]
 fn generate_enhanced_prompt_with_tree_sitter(
     diff_text: &str, 
-    config: &AppConfig,
-    args: &CommitArgs
+    _config: &AppConfig,
+    _args: &CommitArgs
 ) -> Result<String, AppError> {
+    // 临时返回标准提示，Tree-sitter功能已被注释掉
+    Ok(format!("Git diff:\n{}\nGenerate commit message.", diff_text.trim()))
+    
+    /*
     // 获取分析级别
     let analysis_depth = get_analysis_depth(args, config);
     tracing::info!("使用Tree-sitter进行语法分析，级别: {}", analysis_depth);
@@ -167,6 +174,7 @@ fn generate_enhanced_prompt_with_tree_sitter(
             ))
         }
     }
+    */
 }
 
 /// Handles the enhanced commit functionality with AI message generation
@@ -231,6 +239,11 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
         }
         tracing::debug!("Staged changes for AI: \n{}", diff);
 
+        // Tree-sitter功能已被临时注释掉
+        // 准备提示内容 (使用标准分析)
+        let user_prompt = format!("Git diff:\n{}\nGenerate commit message.", diff.trim());
+        
+        /*
         // 检查是否应该使用Tree-sitter分析
         let use_tree_sitter = should_use_tree_sitter(&args, config);
         
@@ -249,6 +262,7 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
             // 使用标准分析
             format!("Git diff:\n{}\nGenerate commit message.", diff.trim())
         };
+        */
 
         let messages = vec![
             ChatMessage {
