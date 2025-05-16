@@ -1,5 +1,3 @@
-use std::any::Any;
-
 use crate::{
     ai_utils::{ChatMessage, OpenAIChatCompletionResponse, OpenAIChatRequest, clean_ai_output},
     config::AppConfig,
