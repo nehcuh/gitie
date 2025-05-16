@@ -16,13 +16,6 @@ const CONFIG_EXAMPLE_FILE_NAME: &str = "assets/config.example.toml";
 const COMMIT_PROMPT_EXAMPLE_FILE_NAME: &str = "assets/commit-prompt";
 const EXPLANATION_PROMPT_EXAMPLE_FILE_NAME: &str = "assets/explanation-prompt";
 
-#[cfg(test)]
-const TEST_CONFIG_EXAMPLE_FILE_NAME: &str = "test_assets/config.example.toml";
-#[cfg(test)]
-const TEST_ASSETS_COMMIT_PROMPT_FILE_NAME: &str = "test_assets/commit-prompt";
-#[cfg(test)]
-const TEST_ASSETS_EXPLANATION_PROMPT_FILE_NAME: &str = "test_assets/explanation-prompt";
-
 // AI 服务配置
 #[derive(Deserialize, Debug, Clone, Default)]
 pub struct AIConfig {
