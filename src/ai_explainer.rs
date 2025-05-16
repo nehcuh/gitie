@@ -115,7 +115,7 @@ pub async fn explain_git_command_output(
         .get("explanation")
         .cloned()
         .unwrap_or_else(|| {
-            tracing::warn!("在配置中未找到解释提示词，使用空字符串");
+            tracing::warn!("在配置中未找到 Git AI helper 提示词，使用空字符串");
             "".to_string()
         });
 
@@ -166,7 +166,7 @@ pub async fn explain_git_command(
         .get("explanation")
         .cloned()
         .unwrap_or_else(|| {
-            tracing::warn!("在配置中未找到解释提示词，使用空字符串");
+            tracing::warn!("在配置中未找到 Git AI helper 提示词，使用空字符串");
             "".to_string()
         });
 
@@ -268,7 +268,7 @@ pub async fn explain_git_error(
         .get("git-master")
         .cloned()
         .unwrap_or_else(|| {
-            tracing::warn!("Git-master 提示词未在配置中找到，使用空字符串");
+            tracing::warn!("Expert prompt 提示词未在配置中找到，使用空字符串");
             "".to_string()
         });
 

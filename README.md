@@ -34,7 +34,7 @@
 
 ## Configuration
 
-`gitie` uses a `config.toml` file in its root directory for AI-related settings and a `prompts/commit-prompt` file for the system prompt used during commit message generation.
+`gitie` uses a `config.toml` file in its root directory for AI-related settings and various prompt files in the `assets` directory for system prompts used during different operations.
 
 1.  **Create `config.toml`**:
     Copy the example configuration file `config.example.toml` to `config.toml` in the root of the `gitie` project (or the directory where you run the executable if it's globally installed and expects the config there - this might need adjustment for global installs).
@@ -57,12 +57,12 @@
         *   `temperature`: Controls the creativity of the AI. Higher values mean more creative/random, lower values mean more deterministic.
         *   `api_key`: Your API key, if the service requires one. This is optional.
 
-    2.  **Customize `prompts/commit-prompt`**:
-        The `prompts/commit-prompt` file contains the system prompt given to the AI to guide its commit message generation. You can edit this file to change the style, tone, or specific requirements for your commit messages.
+    2.  **Customize prompt files**:
+        The `assets/commit-message-generator.md` file contains the system prompt given to the AI to guide its commit message generation. The `assets/git-ai-helper.md` file is used for command explanations, the `assets/expert-prompt.md` file is used for Git error explanations, and the `assets/commit-syntax.md` file is used for commit syntax validation. You can edit these files to change the style, tone, or specific requirements.
 
-        The default prompt encourages conventional commit style messages.
+        The default commit prompt encourages conventional commit style messages.
 
-        *Note: If `config.toml` is not found, `gitie` will use default values, but it will fail if `prompts/commit-prompt` is missing.*
+        *Note: If `config.toml` is not found, `gitie` will use default values, but it will fail if any of the prompt files are missing.*
 
 ## Usage
 
@@ -162,7 +162,7 @@ RUST_LOG=debug gitie commit
 graph TD
     A["User stages changes: git add ."] --> B{"User runs: gitie commit --ai"};
     B --> C{"gitie starts"};
-    C --> D["Load config.json & prompts/commit-prompt"];
+    C --> D["Load config.toml & prompt files from assets"];
     D --> E["Run: git diff --staged"];
     E --> F{"Any staged changes?"};
     F -- "No" --> G["Inform user, exit or pass to git commit"];

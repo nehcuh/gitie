@@ -4,9 +4,62 @@ use crate::{
     config::AppConfig,
     errors::{AIError, AppError, GitError},
     git_commands::map_output_to_git_command_error,
-    // tree_sitter_analyzer::TreeSitterAnalyzer, // Temporarily commented out
+    tree_sitter_analyzer::TreeSitterAnalyzer,
 };
 use std::process::Command as StdCommand;
+
+/// 判断是否是Tree-sitter相关标志
+fn is_tree_sitter_flag(arg: &str) -> bool {
+    arg == "--tree-sitter" || 
+    arg == "-t" || 
+    arg.starts_with("--tree-sitter=")
+}
+
+/// 判断标志是否包含tree-sitter选项
+fn contains_tree_sitter_option(arg: &str) -> bool {
+    // 检查是否是包含't'的短标志组合（如 -at）
+    arg.starts_with('-') && !arg.starts_with("--") && arg.contains('t')
+}
+
+/// 判断标志是否包含自动暂存选项
+fn contains_auto_stage_option(arg: &str) -> bool {
+    // 检查是否是包含'a'的短标志组合（如 -at）
+    arg.starts_with('-') && !arg.starts_with("--") && arg.contains('a')
+}
+
+/// 判断参数是否是Tree-sitter标志的值
+fn is_tree_sitter_value(args: &[String], index: usize) -> bool {
+    if index == 0 {
+        return false;
+    }
+    
+    // 检查前一个参数是否是tree-sitter标志
+    let prev_arg = &args[index - 1];
+    if (prev_arg == "--tree-sitter" || prev_arg == "-t") && !args[index].starts_with('-') {
+        return true;
+    }
+    
+    false
+}
+
+/// 从短标志组合中创建新的参数，移除特定选项
+fn create_filtered_short_option(arg: &str, remove_options: &[char]) -> Option<String> {
+    if !arg.starts_with('-') || arg.starts_with("--") {
+        return None;
+    }
+    
+    // 过滤掉不需要的选项
+    let filtered: String = arg.chars()
+        .filter(|c| *c == '-' || !remove_options.contains(c))
+        .collect();
+    
+    // 如果只剩下'-'，返回None
+    if filtered == "-" {
+        None
+    } else {
+        Some(filtered)
+    }
+}
 
 /// Handles a standard git commit by passing through to git
 ///
@@ -41,13 +94,49 @@ pub async fn handle_commit_passthrough(
         cmd_builder.arg("-m").arg(message);
     }
 
-    // Add remaining args, but exclude -a and -all if auto_stage is true
-    for arg in &args.passthrough_args {
-        if !(args.auto_stage
-            && (arg == "-a"
-                || arg == "--all"
-                || (arg.starts_with('-') && !arg.starts_with("--") && arg.contains('a'))))
-        {
+    // Add remaining args, but exclude -a, -all if auto_stage is true, and tree-sitter flags with their values
+    for (i, arg) in args.passthrough_args.iter().enumerate() {
+        // 判断是否是特定标志
+        let is_auto_stage_flag = arg == "-a" || arg == "--all";
+        let is_ts_flag = is_tree_sitter_flag(arg);
+        let is_ts_value = is_tree_sitter_value(&args.passthrough_args, i);
+        
+        // 处理组合的短标志
+        let contains_auto_stage = contains_auto_stage_option(arg);
+        let contains_ts = contains_tree_sitter_option(arg);
+        
+        if (args.auto_stage && (is_auto_stage_flag || contains_auto_stage)) || 
+           is_ts_flag || 
+           is_ts_value {
+            // 跳过这些标志
+            continue;
+        }
+        
+        // 处理包含多个选项的组合短标志
+        if contains_auto_stage && contains_ts {
+            // 如果同时包含auto-stage和tree-sitter选项，则需要特殊处理
+            // 移除 'a' 和 't'
+            if let Some(filtered_arg) = create_filtered_short_option(arg, &['a', 't']) {
+                if filtered_arg != "-" {
+                    cmd_builder.arg(filtered_arg);
+                }
+            }
+        } else if args.auto_stage && contains_auto_stage {
+            // 如果启用了auto-stage，移除 'a'
+            if let Some(filtered_arg) = create_filtered_short_option(arg, &['a']) {
+                if filtered_arg != "-" {
+                    cmd_builder.arg(filtered_arg);
+                }
+            }
+        } else if contains_ts {
+            // 如果包含tree-sitter选项，移除 't'
+            if let Some(filtered_arg) = create_filtered_short_option(arg, &['t']) {
+                if filtered_arg != "-" {
+                    cmd_builder.arg(filtered_arg);
+                }
+            }
+        } else {
+            // 没有特殊处理的情况，直接添加
             cmd_builder.arg(arg);
         }
     }
@@ -74,7 +163,6 @@ pub async fn handle_commit_passthrough(
 }
 
 /// 判断是否应该使用Tree-sitter分析
-#[allow(dead_code)]
 fn should_use_tree_sitter(args: &CommitArgs, config: &AppConfig) -> bool {
     // 优先使用命令行参数
     if args.tree_sitter.is_some() {
@@ -92,7 +180,6 @@ fn should_use_tree_sitter(args: &CommitArgs, config: &AppConfig) -> bool {
 }
 
 /// 获取Tree-sitter分析级别
-#[allow(dead_code)]
 fn get_analysis_depth(args: &CommitArgs, config: &AppConfig) -> String {
     // 优先使用命令行参数
     if let Some(level) = &args.tree_sitter {
@@ -113,16 +200,11 @@ fn get_analysis_depth(args: &CommitArgs, config: &AppConfig) -> String {
 }
 
 /// 使用Tree-sitter生成增强提示
-#[allow(dead_code)]
 fn generate_enhanced_prompt_with_tree_sitter(
     diff_text: &str, 
-    _config: &AppConfig,
-    _args: &CommitArgs
+    config: &AppConfig,
+    args: &CommitArgs
 ) -> Result<String, AppError> {
-    // 临时返回标准提示，Tree-sitter功能已被注释掉
-    Ok(format!("Git diff:\n{}\nGenerate commit message.", diff_text.trim()))
-    
-    /*
     // 获取分析级别
     let analysis_depth = get_analysis_depth(args, config);
     tracing::info!("使用Tree-sitter进行语法分析，级别: {}", analysis_depth);
@@ -174,7 +256,6 @@ fn generate_enhanced_prompt_with_tree_sitter(
             ))
         }
     }
-    */
 }
 
 /// Handles the enhanced commit functionality with AI message generation
@@ -239,11 +320,6 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
         }
         tracing::debug!("Staged changes for AI: \n{}", diff);
 
-        // Tree-sitter功能已被临时注释掉
-        // 准备提示内容 (使用标准分析)
-        let user_prompt = format!("Git diff:\n{}\nGenerate commit message.", diff.trim());
-        
-        /*
         // 检查是否应该使用Tree-sitter分析
         let use_tree_sitter = should_use_tree_sitter(&args, config);
         
@@ -262,13 +338,12 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
             // 使用标准分析
             format!("Git diff:\n{}\nGenerate commit message.", diff.trim())
         };
-        */
 
         let messages = vec![
             ChatMessage {
                 role: "system".to_string(),
                 content: config.prompts.get("commit").cloned().unwrap_or_else(|| {
-                    tracing::warn!("在配置中未找到提交提示词，使用空字符串");
+                    tracing::warn!("在配置中未找到 Commit Message Generator 提示词，使用空字符串");
                     "".to_string()
                 }),
             },
@@ -321,12 +396,49 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
         let mut cmd_builder = StdCommand::new("git");
         cmd_builder.arg("commit").arg("-m").arg(&final_msg);
 
-        // Filter out -a and --all from passthrough_args if auto_stage=true
-        for p_arg in &args.passthrough_args {
-            if p_arg != "-a"
-                && p_arg != "--all"
-                && !(p_arg.starts_with('-') && !p_arg.starts_with("--") && p_arg.contains('a'))
-            {
+        // Filter out -a, --all from passthrough_args if auto_stage=true, and tree-sitter flags with their values
+        for (i, p_arg) in args.passthrough_args.iter().enumerate() {
+            // 判断是否是特定标志
+            let is_auto_stage_flag = p_arg == "-a" || p_arg == "--all";
+            let is_ts_flag = is_tree_sitter_flag(p_arg);
+            let is_ts_value = is_tree_sitter_value(&args.passthrough_args, i);
+            
+            // 处理组合的短标志
+            let contains_auto_stage = contains_auto_stage_option(p_arg);
+            let contains_ts = contains_tree_sitter_option(p_arg);
+            
+            if (args.auto_stage && (is_auto_stage_flag || contains_auto_stage)) || 
+               is_ts_flag || 
+               is_ts_value {
+                // 跳过这些标志
+                continue;
+            }
+            
+            // 处理包含多个选项的组合短标志
+            if contains_auto_stage && contains_ts {
+                // 如果同时包含auto-stage和tree-sitter选项，则需要特殊处理
+                // 移除 'a' 和 't'
+                if let Some(filtered_arg) = create_filtered_short_option(p_arg, &['a', 't']) {
+                    if filtered_arg != "-" {
+                        cmd_builder.arg(filtered_arg);
+                    }
+                }
+            } else if args.auto_stage && contains_auto_stage {
+                // 如果启用了auto-stage，移除 'a'
+                if let Some(filtered_arg) = create_filtered_short_option(p_arg, &['a']) {
+                    if filtered_arg != "-" {
+                        cmd_builder.arg(filtered_arg);
+                    }
+                }
+            } else if contains_ts {
+                // 如果包含tree-sitter选项，移除 't'
+                if let Some(filtered_arg) = create_filtered_short_option(p_arg, &['t']) {
+                    if filtered_arg != "-" {
+                        cmd_builder.arg(filtered_arg);
+                    }
+                }
+            } else {
+                // 没有特殊处理的情况，直接添加
                 cmd_builder.arg(p_arg);
             }
         }

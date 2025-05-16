@@ -34,7 +34,7 @@
 
 ## 配置
 
-`gitie` 在其根目录中使用 `config.toml` 文件进行 AI 相关设置，并使用 `prompts/commit-prompt` 文件作为生成提交信息时使用的系统提示。
+`gitie` 在其根目录中使用 `config.toml` 文件进行 AI 相关设置，并使用 `assets` 目录中的各种提示文件作为不同操作时使用的系统提示。
 
 1.  **创建 `config.toml`**：
     将示例配置文件 `config.example.toml` 复制到 `gitie` 项目的根目录下，并重命名为 `config.toml`（如果它是全局安装并且期望在那里找到配置文件，则复制到运行可执行文件的目录——这可能需要针对全局安装进行调整）。
@@ -57,12 +57,12 @@
         *   `temperature`: 控制 AI 的创造力。较高的值意味着更具创造性/随机性，较低的值意味着更具确定性。
         *   `api_key`: 您的 API 密钥，如果服务需要。这是可选的。
 
-2.  **自定义 `prompts/commit-prompt`**：
-    `prompts/commit-prompt` 文件包含提供给 AI 的系统提示，以指导其生成提交信息。您可以编辑此文件以更改提交信息的风格、语气或特定要求。
+2.  **自定义提示文件**：
+    `assets/commit-message-generator.md` 文件包含提供给 AI 的系统提示，以指导其生成提交信息。`assets/git-ai-helper.md` 文件用于命令解释，`assets/expert-prompt.md` 文件用于 Git 错误解释，而 `assets/commit-syntax.md` 文件用于提交语法验证。您可以编辑这些文件以更改风格、语气或特定要求。
 
-    默认提示鼓励使用约定式提交 (conventional commit) 风格的信息。
+    默认提交提示鼓励使用约定式提交 (conventional commit) 风格的信息。
 
-    *注意：如果找不到 `config.toml`，`gitie` 将使用默认值，但如果缺少 `prompts/commit-prompt`，它将失败。*
+    *注意：如果找不到 `config.toml`，`gitie` 将使用默认值，但如果缺少任何提示文件，它将失败。*
 
 ## 使用方法
 
@@ -161,7 +161,7 @@ RUST_LOG=debug gitie commit
 graph TD
     A[\"用户暂存更改: git add .\"] --> B{\"用户运行: gitie commit --ai\"};
     B --> C{\"gitie 启动\"};
-    C --> D[\"加载 config.json 和 prompts/commit-prompt\"];
+    C --> D["加载 config.toml 和 assets 目录中的提示文件"];
     D --> E[\"运行: git diff --staged\"];
     E --> F{\"有暂存的更改吗?\"};
     F -- \"否\" --> G[\"通知用户，退出或传递给 git commit\"];

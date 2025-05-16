@@ -5,6 +5,7 @@ mod commit_commands;
 mod config;
 mod errors;
 mod git_commands;
+mod tree_sitter_analyzer;
 mod types;
 
 use crate::ai_explainer::{explain_git_command, explain_git_command_output, explain_git_error};
@@ -17,6 +18,74 @@ use crate::git_commands::{
     passthrough_to_git, passthrough_to_git_with_error_handling,
 };
 use clap::Parser;
+
+/// 过滤命令参数，移除tree-sitter相关标志
+fn filter_tree_sitter_args(args: &[String]) -> Vec<String> {
+    let mut filtered = Vec::new();
+    let mut skip_next = false;
+    
+    // 检查第一个参数是否是tree-sitter，这可能是误用
+    if !args.is_empty() && args[0] == "tree-sitter" {
+        tracing::info!("检测到误用形式: tree-sitter作为第一个参数");
+        // 如果传入的第一个参数是tree-sitter，可能是"gitie tree-sitter commit"这样的形式
+        // 在这种情况下，我们忽略tree-sitter并处理其它参数
+        if args.len() > 1 {
+            return args[1..].to_vec();
+        }
+    }
+    
+    for (i, arg) in args.iter().enumerate() {
+        // 如果当前参数需要被跳过（因为它是前一个标志的值）
+        if skip_next {
+            skip_next = false;
+            tracing::debug!("跳过tree-sitter参数值: {}", arg);
+            continue;
+        }
+        
+        // 检查是否是tree-sitter标志
+        if arg == "--tree-sitter" || arg == "-t" {
+            // 如果下一个参数存在且不是以'-'开头，它是值参数，需要跳过
+            if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                tracing::debug!("标记跳过下一个tree-sitter值参数: {}", args[i + 1]);
+                skip_next = true;
+            }
+            tracing::debug!("过滤tree-sitter标志: {}", arg);
+            continue;
+        }
+        
+        // 检查带有值的tree-sitter标志 (--tree-sitter=value)
+        if arg.starts_with("--tree-sitter=") {
+            continue;
+        }
+        
+        // 检查是否是"tree-sitter"（无前缀）- 在某些情况下可能被误解
+        if arg == "tree-sitter" {
+            continue;
+        }
+        
+        // 处理短标志组合 (如 -at)
+        if arg.starts_with('-') && !arg.starts_with("--") && arg.contains('t') {
+            // 创建不包含't'的新标志
+            let new_arg: String = arg.chars()
+                .filter(|&c| c != 't')
+                .collect();
+            
+            // 如果过滤后不只是 "-"，则添加
+            if new_arg != "-" {
+                filtered.push(new_arg);
+            }
+            continue;
+        }
+        
+        // 正常的参数，添加到过滤后的列表
+        filtered.push(arg.clone());
+    }
+    
+    tracing::debug!("过滤前参数: {:?}", args);
+    tracing::debug!("过滤后参数: {:?}", filtered);
+    
+    filtered
+}
 
 fn main() {
     tracing_subscriber::fmt()
@@ -52,9 +121,64 @@ async fn execute_git_command_with_error_handling(
     args: &[String],
     use_ai: bool,
 ) -> Result<(), AppError> {
+    // 特殊处理: 直接检查所有可能的commit命令形式
+    // 注意：这是一个跳过正常git命令执行的重要逻辑
+    if !args.is_empty() {
+        let contains_commit = args.iter().any(|arg| arg == "commit");
+        if contains_commit || (args.len() > 1 && args[1] == "commit") {
+            tracing::info!("在execute_git_command中检测到commit命令，重定向到handle_commit: {:?}", args);
+            
+            // 重新构建命令，确保commit在第一位置
+            let mut commit_args_vec = vec!["gitie".to_string(), "commit".to_string()];
+            for arg in args.iter().filter(|a| *a != "commit") {
+                commit_args_vec.push(arg.clone());
+            }
+            
+            tracing::debug!("重构的commit命令: {:?}", commit_args_vec);
+            
+            if let Ok(parsed_args) = GitieArgs::try_parse_from(&commit_args_vec) {
+                match parsed_args.command {
+                    GitieSubCommand::Commit(commit_args) => {
+                        return handle_commit(commit_args, &config).await;
+                    }
+                }
+            } else {
+                tracing::warn!("解析commit命令失败，将创建默认commit命令");
+                // 即使解析失败，也应该处理为commit命令
+                let default_commit_args = cli::CommitArgs {
+                    ai: !args.contains(&"--noai".to_string()),
+                    noai: args.contains(&"--noai".to_string()),
+                    tree_sitter: None,
+                    auto_stage: args.contains(&"-a".to_string()) || args.contains(&"--all".to_string()),
+                    message: None,
+                    passthrough_args: args.iter().filter(|a| *a != "commit").cloned().collect(),
+                };
+                return handle_commit(default_commit_args, &config).await;
+            }
+        }
+    }
+    
+    // 过滤掉tree-sitter相关标志
+    let filtered_args = filter_tree_sitter_args(args);
+    
+    // 再次检查过滤后的参数是否包含commit
+    if !filtered_args.is_empty() && filtered_args[0] == "commit" {
+        tracing::warn!("过滤参数后仍检测到commit命令，使用默认处理");
+        let default_commit_args = cli::CommitArgs {
+            ai: !filtered_args.contains(&"--noai".to_string()),
+            noai: filtered_args.contains(&"--noai".to_string()),
+            tree_sitter: None,
+            auto_stage: filtered_args.contains(&"-a".to_string()) || filtered_args.contains(&"--all".to_string()),
+            message: None,
+            passthrough_args: filtered_args.iter().cloned().collect(),
+        };
+        return handle_commit(default_commit_args, &config).await;
+    }
+    
     // Execute Git command and capture output
-    let cmd_str_log = args.join(" ");
-    let output = passthrough_to_git_with_error_handling(args, use_ai)?;
+    let cmd_str_log = filtered_args.join(" ");
+    tracing::debug!("执行git命令: git {}", cmd_str_log);
+    let output = passthrough_to_git_with_error_handling(&filtered_args, use_ai)?;
 
     // If AI is enabled and command execution failed, provide AI error explanation
     if use_ai && !output.status.success() {
@@ -155,6 +279,10 @@ async fn run_app() -> Result<(), AppError> {
             tracing::info!("检测到帮助标志和 --noai。传递给 git。");
             let mut filtered_args = raw_cli_args.clone();
             filtered_args.retain(|arg| arg != "--noai");
+            
+            // 过滤掉tree-sitter标志，防止直接传递给git
+            filtered_args = filter_tree_sitter_args(&filtered_args);
+            
             passthrough_to_git(&filtered_args)?;
         }
     } else {
@@ -162,13 +290,78 @@ async fn run_app() -> Result<(), AppError> {
         let mut gitie_parser_args = vec!["gitie-dummy".to_string()]; // Dummy executable name for clap
         gitie_parser_args.extend_from_slice(&raw_cli_args);
 
+        // 首先检查第一个非选项参数是否是commit命令
+        let first_non_option_arg = raw_cli_args.iter()
+            .filter(|arg| !arg.starts_with('-'))
+            .next();
+            
+        if let Some(arg) = first_non_option_arg {
+            if arg == "commit" {
+                tracing::info!("检测到commit命令: {:?}", raw_cli_args);
+                // 直接构建GitieSubCommand::Commit
+                tracing::info!("检测到直接的commit命令，构建commit子命令。");
+                let mut commit_args_vec = vec!["gitie".to_string(), "commit".to_string()];
+                for arg in &raw_cli_args[1..] {
+                    commit_args_vec.push(arg.clone());
+                }
+                    
+                if let Ok(parsed_args) = GitieArgs::try_parse_from(&commit_args_vec) {
+                    match parsed_args.command {
+                        GitieSubCommand::Commit(commit_args) => {
+                            tracing::info!("已解析为 gitie commit 子命令。委托给 handle_commit");
+                            return handle_commit(commit_args, &config).await;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 检查组合参数中是否包含commit
+        let contains_commit = raw_cli_args.iter().any(|arg| arg == "commit");
+        if contains_commit {
+            tracing::info!("在参数中检测到commit: {:?}", raw_cli_args);
+            // 重新排列参数，将commit放在第一位
+            let mut rearranged_args = vec!["gitie".to_string(), "commit".to_string()];
+        
+            // 添加所有不是"commit"的参数
+            for arg in raw_cli_args.iter() {
+                if arg != "commit" {
+                    rearranged_args.push(arg.clone());
+                }
+            }
+        
+            tracing::debug!("重新排列参数: {:?}", rearranged_args);
+        
+            if let Ok(parsed_args) = GitieArgs::try_parse_from(&rearranged_args) {
+                match parsed_args.command {
+                    GitieSubCommand::Commit(commit_args) => {
+                        tracing::info!("成功重新解析为commit命令");
+                        return handle_commit(commit_args, &config).await;
+                    }
+                }
+            } else {
+                tracing::warn!("解析commit参数失败，使用默认commit参数");
+                // 即使解析失败，也应该处理为commit命令
+                let default_commit_args = cli::CommitArgs {
+                    ai: !raw_cli_args.contains(&"--noai".to_string()),
+                    noai: raw_cli_args.contains(&"--noai".to_string()),
+                    tree_sitter: None,
+                    auto_stage: raw_cli_args.contains(&"-a".to_string()) || raw_cli_args.contains(&"--all".to_string()),
+                    message: None,
+                    passthrough_args: raw_cli_args.iter().filter(|a| *a != "commit").cloned().collect(),
+                };
+                return handle_commit(default_commit_args, &config).await;
+            }
+        }
+            
+        // 尝试常规解析
         match GitieArgs::try_parse_from(&gitie_parser_args) {
             Ok(parsed_args) => {
                 // Successfully parsed as a gitie specific command
                 match parsed_args.command {
                     GitieSubCommand::Commit(commit_args) => {
                         // This handles `gitie commit --ai` as well as `gitie commit -m "message"`
-                        // The `handle_commit` function itself checks `commit_args.ai`:w
+                        // The `handle_commit` function itself checks `commit_args.ai`
                         tracing::info!("已解析为 gitie commit 子命令。委托给 handle_commit");
                         handle_commit(commit_args, &config).await?;
                     } // Future: Add other SubCommand arms here if they are added to cli.rs
@@ -183,6 +376,54 @@ async fn run_app() -> Result<(), AppError> {
 
                     let mut command_to_explain = raw_cli_args.clone();
                     command_to_explain.retain(|arg| arg != "--ai"); // Remove all occurrences of --ai for backward compatibility
+                    
+                    // 检查是否任何位置包含 "commit" 参数，这可能表示用户想要使用commit命令
+                    // 但忽略以'-'开头的参数，因为这些可能是选项而不是子命令
+                    let commit_index = command_to_explain.iter()
+                        .position(|arg| arg == "commit" && !arg.starts_with('-'));
+                    
+                    tracing::debug!("命令解析: {:?}, commit_index: {:?}", command_to_explain, commit_index);
+                    
+                    // 如果commit_index存在，重新排列参数并尝试解析
+                    if let Some(index) = commit_index {
+                        // 创建一个包含 "gitie commit" 和所有其它参数的新命令行，但移动commit到前面
+                        let mut gitie_args = vec!["gitie".to_string(), "commit".to_string()];
+                        
+                        // 添加commit之前的参数（可能包含选项）
+                        for arg in &command_to_explain[..index] {
+                            gitie_args.push(arg.clone());
+                        }
+                        
+                        // 添加commit之后的参数（跳过commit本身）
+                        if index + 1 < command_to_explain.len() {
+                            for arg in &command_to_explain[index+1..] {
+                                gitie_args.push(arg.clone());
+                            }
+                        }
+                        
+                        tracing::info!("尝试重新解析为commit命令: {:?}", gitie_args);
+                        
+                        if let Ok(parsed_args) = GitieArgs::try_parse_from(&gitie_args) {
+                            match parsed_args.command {
+                                GitieSubCommand::Commit(commit_args) => {
+                                    tracing::info!("成功重新解析为 gitie commit 子命令。委托给 handle_commit");
+                                    return handle_commit(commit_args, &config).await;
+                                }
+                            }
+                        } else {
+                            tracing::warn!("解析commit命令失败，使用默认commit参数");
+                            // 即使解析失败，也应该处理为commit命令 
+                            let default_commit_args = cli::CommitArgs {
+                                ai: !command_to_explain.contains(&"--noai".to_string()),
+                                noai: command_to_explain.contains(&"--noai".to_string()),
+                                tree_sitter: None,
+                                auto_stage: command_to_explain.contains(&"-a".to_string()) || command_to_explain.contains(&"--all".to_string()),
+                                message: None,
+                                passthrough_args: command_to_explain.iter().filter(|a| *a != "commit").cloned().collect(),
+                            };
+                            return handle_commit(default_commit_args, &config).await;
+                        }
+                    }
 
                     if command_to_explain.is_empty() {
                         // Handle `gitie` with no actual command
@@ -222,6 +463,10 @@ async fn run_app() -> Result<(), AppError> {
                     tracing::info!("检测到 --noai 标志。不使用 AI 功能传递给 git。");
                     let mut filtered_args = raw_cli_args.clone();
                     filtered_args.retain(|arg| arg != "--noai");
+                    
+                    // 过滤掉tree-sitter标志，防止直接传递给git
+                    filtered_args = filter_tree_sitter_args(&filtered_args);
+                    
                     execute_git_command_with_error_handling(&config, &filtered_args, false).await?;
                 }
             }
