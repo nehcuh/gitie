@@ -4,6 +4,7 @@ pub enum AppError {
     Config(ConfigError),
     Git(GitError),
     AI(AIError),
+    TreeSitter(TreeSitterError),
     IO(String, std::io::Error), // For general I/O errors not covered by specific types
     Generic(String),            // For simple string-based errors
 }
@@ -52,6 +53,18 @@ pub enum AIError {
     ExplainerNetworkError(String), // For network errors from explainer not covered by reqwest::Error
 }
 
+#[allow(unused)]
+#[derive(Debug)]
+pub enum TreeSitterError {
+    UnsupportedLanguage(String),
+    ParseError(String),
+    QueryError(String),
+    CacheError(String),
+    InitializationError(String),
+    AnalysisTimeout(String),
+    IoError(std::io::Error),
+}
+
 
 
 impl std::fmt::Display for AppError {
@@ -60,6 +73,7 @@ impl std::fmt::Display for AppError {
             AppError::Config(e) => write!(f, "Configuration error: {}", e),
             AppError::Git(e) => write!(f, "Git command error: {}", e),
             AppError::AI(e) => write!(f, "AI interaction error: {}", e),
+            AppError::TreeSitter(e) => write!(f, "Tree-sitter error: {}", e),
             AppError::IO(context, e) => write!(f, "I/O error while {}: {}", context, e),
             AppError::Generic(s) => write!(f, "Application error: {}", s),
         }
@@ -72,6 +86,7 @@ impl std::error::Error for AppError {
             AppError::Config(e) => Some(e),
             AppError::Git(e) => Some(e),
             AppError::AI(e) => Some(e),
+            AppError::TreeSitter(e) => Some(e),
             AppError::IO(_, e) => Some(e),
             AppError::Generic(_) => None,
         }
@@ -200,6 +215,29 @@ impl std::error::Error for AIError {
     }
 }
 
+impl std::fmt::Display for TreeSitterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TreeSitterError::UnsupportedLanguage(lang) => write!(f, "Unsupported language: {}", lang),
+            TreeSitterError::ParseError(msg) => write!(f, "Parse error: {}", msg),
+            TreeSitterError::QueryError(msg) => write!(f, "Query error: {}", msg),
+            TreeSitterError::CacheError(msg) => write!(f, "Cache error: {}", msg),
+            TreeSitterError::InitializationError(msg) => write!(f, "Initialization error: {}", msg),
+            TreeSitterError::AnalysisTimeout(msg) => write!(f, "Analysis timeout: {}", msg),
+            TreeSitterError::IoError(e) => write!(f, "I/O error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for TreeSitterError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            TreeSitterError::IoError(e) => Some(e),
+            _ => None, // Other values are self-contained
+        }
+    }
+}
+
 // --- From implementations for AppError ---
 
 impl From<ConfigError> for AppError {
@@ -217,6 +255,12 @@ impl From<GitError> for AppError {
 impl From<AIError> for AppError {
     fn from(err: AIError) -> Self {
         AppError::AI(err)
+    }
+}
+
+impl From<TreeSitterError> for AppError {
+    fn from(err: TreeSitterError) -> Self {
+        AppError::TreeSitter(err)
     }
 }
 

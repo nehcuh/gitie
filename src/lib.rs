@@ -8,4 +8,5 @@ pub mod commit_commands;
 pub mod config;
 pub mod errors;
 pub mod git_commands;
+pub mod tree_sitter_analyzer;
 pub mod types;

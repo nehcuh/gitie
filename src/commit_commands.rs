@@ -4,6 +4,7 @@ use crate::{
     config::AppConfig,
     errors::{AIError, AppError, GitError},
     git_commands::map_output_to_git_command_error,
+    tree_sitter_analyzer::TreeSitterAnalyzer,
 };
 use std::process::Command as StdCommand;
 
@@ -72,6 +73,102 @@ pub async fn handle_commit_passthrough(
     Ok(())
 }
 
+/// 判断是否应该使用Tree-sitter分析
+fn should_use_tree_sitter(args: &CommitArgs, config: &AppConfig) -> bool {
+    // 优先使用命令行参数
+    if args.tree_sitter.is_some() {
+        tracing::info!("通过命令行参数启用Tree-sitter分析");
+        return true;
+    }
+
+    // 否则使用配置文件中的设置
+    if config.tree_sitter.enabled {
+        tracing::info!("通过配置文件启用Tree-sitter分析");
+        return true;
+    }
+
+    false
+}
+
+/// 获取Tree-sitter分析级别
+fn get_analysis_depth(args: &CommitArgs, config: &AppConfig) -> String {
+    // 优先使用命令行参数
+    if let Some(level) = &args.tree_sitter {
+        if !level.is_empty() {
+            match level.as_str() {
+                "shallow" | "medium" | "deep" => {
+                    return level.clone();
+                }
+                _ => {
+                    tracing::warn!("无效的分析级别: {}，使用默认值 'medium'", level);
+                }
+            }
+        }
+    }
+
+    // 否则使用配置文件中的设置
+    config.tree_sitter.analysis_depth.clone()
+}
+
+/// 使用Tree-sitter生成增强提示
+fn generate_enhanced_prompt_with_tree_sitter(
+    diff_text: &str, 
+    config: &AppConfig,
+    args: &CommitArgs
+) -> Result<String, AppError> {
+    // 获取分析级别
+    let analysis_depth = get_analysis_depth(args, config);
+    tracing::info!("使用Tree-sitter进行语法分析，级别: {}", analysis_depth);
+
+    // 克隆配置并设置分析级别
+    let mut ts_config = config.tree_sitter.clone();
+    ts_config.analysis_depth = analysis_depth;
+
+    // 初始化Tree-sitter分析器
+    let mut analyzer = match TreeSitterAnalyzer::new(ts_config) {
+        Ok(analyzer) => analyzer,
+        Err(e) => {
+            return Err(AppError::IO(
+                format!("Tree-sitter初始化失败: {}", e), 
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+            ));
+        }
+    };
+
+    // 尝试获取项目根目录
+    if let Ok(output) = StdCommand::new("git")
+        .args(&["rev-parse", "--show-toplevel"])
+        .output() 
+    {
+        if output.status.success() {
+            let root_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            analyzer.set_project_root(root_path.into());
+        }
+    }
+
+    // 执行分析
+    match analyzer.analyze_diff(diff_text) {
+        Ok(analysis) => {
+            // 生成增强提示
+            let enhanced_prompt = format!(
+                "Git diff:\n{}\n\n{}\nGenerate commit message.",
+                diff_text.trim(),
+                analyzer.generate_commit_prompt(&analysis)
+            );
+        
+            tracing::debug!("生成了增强的提交提示: \n{}", enhanced_prompt);
+        
+            Ok(enhanced_prompt)
+        },
+        Err(e) => {
+            Err(AppError::IO(
+                format!("Tree-sitter分析失败: {}", e),
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+            ))
+        }
+    }
+}
+
 /// Handles the enhanced commit functionality with AI message generation
 ///
 /// # Arguments
@@ -119,6 +216,7 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
                     ai: false,
                     noai: true,
                     auto_stage: args.auto_stage,
+                    tree_sitter: None,
                     message: None,
                     passthrough_args: args.passthrough_args.clone(),
                 };
@@ -132,7 +230,26 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
             }
         }
         tracing::debug!("Staged changes for AI: \n{}", diff);
-        let user_prompt = format!("Git diff:\n{}\nGenerate commit message.", diff.trim());
+
+        // 检查是否应该使用Tree-sitter分析
+        let use_tree_sitter = should_use_tree_sitter(&args, config);
+        
+        // 准备提示内容
+        let user_prompt = if use_tree_sitter {
+            // 使用Tree-sitter增强分析
+            match generate_enhanced_prompt_with_tree_sitter(&diff, config, &args) {
+                Ok(enhanced_prompt) => enhanced_prompt,
+                Err(e) => {
+                    // 如果Tree-sitter分析失败，记录警告并回退到标准分析
+                    tracing::warn!("Tree-sitter分析失败，回退到标准分析: {}", e);
+                    format!("Git diff:\n{}\nGenerate commit message.", diff.trim())
+                }
+            }
+        } else {
+            // 使用标准分析
+            format!("Git diff:\n{}\nGenerate commit message.", diff.trim())
+        };
+
         let messages = vec![
             ChatMessage {
                 role: "system".to_string(),

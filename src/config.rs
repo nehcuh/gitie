@@ -13,10 +13,12 @@ const USER_CONFIG_FILE_NAME: &str = "config.toml";
 const USER_COMMIT_PROMPT_FILE_NAME: &str = "commit-prompt";
 const USER_EXPLANATION_PROMPT_FILE_NAME: &str = "commit-prompt";
 const USER_GIT_MASTER_PROMPT_FILE_NAME: &str = "git-master-prompt";
+const USER_COMMIT_SYNTAX_PROMPT_FILE_NAME: &str = "commit-syntax-prompt";
 const CONFIG_EXAMPLE_FILE_NAME: &str = "assets/config.example.toml";
 const COMMIT_PROMPT_EXAMPLE_FILE_NAME: &str = "assets/commit-prompt";
 const EXPLANATION_PROMPT_EXAMPLE_FILE_NAME: &str = "assets/explanation-prompt";
 const GIT_MASTER_PROMPT_EXAMPLE_FILE_NAME: &str = "assets/git-master-prompt";
+const COMMIT_SYNTAX_PROMPT_EXAMPLE_FILE_NAME: &str = "assets/commit-syntax-prompt";
 
 // AI 服务配置
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -25,6 +27,49 @@ pub struct AIConfig {
     pub model_name: String,
     pub temperature: f32,
     pub api_key: Option<String>,
+}
+
+// Tree-sitter 配置
+#[derive(Deserialize, Debug, Clone)]
+pub struct TreeSitterConfig {
+    /// 是否启用语法树分析
+    #[serde(default)]
+    pub enabled: bool,
+    
+    /// 分析深度: "shallow", "medium", "deep"
+    #[serde(default = "default_analysis_depth")]
+    pub analysis_depth: String,
+    
+    /// 是否启用缓存
+    #[serde(default = "default_cache_enabled")]
+    pub cache_enabled: bool,
+    
+    /// 支持的语言列表
+    #[serde(default = "default_languages")]
+    pub languages: Vec<String>,
+}
+
+impl Default for TreeSitterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            analysis_depth: default_analysis_depth(),
+            cache_enabled: default_cache_enabled(),
+            languages: default_languages(),
+        }
+    }
+}
+
+fn default_analysis_depth() -> String {
+    "medium".to_string()
+}
+
+fn default_cache_enabled() -> bool {
+    true
+}
+
+fn default_languages() -> Vec<String> {
+    vec!["rust".to_string(), "javascript".to_string(), "python".to_string()]
 }
 
 // AI 配置的部分加载辅助结构体
@@ -40,11 +85,27 @@ struct PartialAIConfig {
     api_key: Option<String>,
 }
 
+// Tree-sitter 配置的部分加载辅助结构体
+#[derive(Deserialize, Debug, Default, Clone)]
+struct PartialTreeSitterConfig {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    analysis_depth: Option<String>,
+    #[serde(default)]
+    cache_enabled: Option<bool>,
+    #[serde(default)]
+    languages: Option<Vec<String>>,
+}
+
 // 应用总体配置
 #[derive(Deserialize, Debug, Clone)]
 pub struct AppConfig {
     #[serde(default)]
     pub ai: AIConfig,
+
+    #[serde(default)]
+    pub tree_sitter: TreeSitterConfig,
 
     #[serde(skip)] // System prompt is loaded separately
     pub prompts: HashMap<String, String>,
@@ -54,6 +115,7 @@ pub struct AppConfig {
 #[derive(Deserialize, Debug, Default)]
 struct PartialAppConfig {
     ai: Option<PartialAIConfig>,
+    tree_sitter: Option<PartialTreeSitterConfig>,
 }
 
 impl AppConfig {
@@ -68,6 +130,8 @@ impl AppConfig {
             Self::get_user_file_path(USER_EXPLANATION_PROMPT_FILE_NAME)?;
         let user_git_master_prompt_path = 
             Self::get_user_file_path(USER_GIT_MASTER_PROMPT_FILE_NAME)?;
+        let user_commit_syntax_prompt_path = 
+            Self::get_user_file_path(USER_COMMIT_SYNTAX_PROMPT_FILE_NAME)?;
 
         let mut user_prompt_paths = HashMap::new();
         user_prompt_paths.insert("commit".to_string(), user_commit_prompt_path.clone());
@@ -79,16 +143,21 @@ impl AppConfig {
             "git-master".to_string(),
             user_git_master_prompt_path.clone(),
         );
+        user_prompt_paths.insert(
+            "commit-syntax".to_string(),
+            user_commit_syntax_prompt_path.clone(),
+        );
 
         // 如果用户配置已存在，则直接返回路径
         if user_config_path.exists()
             && user_commit_prompt_path.exists()
             && user_explanation_prompt_path.exists()
             && user_git_master_prompt_path.exists()
+            && user_commit_syntax_prompt_path.exists()
         {
             info!(
-                "用户配置已存在于: {:?}\n 用户 commit-prompt 已存在于: {:?}\n 用户 explanation-prompt 已存在于: {:?}\n 用户 git-master-prompt 已存在于: {:?}",
-                user_config_path, user_commit_prompt_path, user_explanation_prompt_path, user_git_master_prompt_path
+                "用户配置已存在于: {:?}\n 用户 commit-prompt 已存在于: {:?}\n 用户 explanation-prompt 已存在于: {:?}\n 用户 git-master-prompt 已存在于: {:?}\n 用户 commit-syntax-prompt 已存在于: {:?}",
+                user_config_path, user_commit_prompt_path, user_explanation_prompt_path, user_git_master_prompt_path, user_commit_syntax_prompt_path
             );
             return Ok((user_config_path, user_prompt_paths));
         }
@@ -194,6 +263,25 @@ impl AppConfig {
                     .unwrap_or_else(|_| GIT_MASTER_PROMPT_EXAMPLE_FILE_NAME.to_string()),
             )
         };
+        
+        // 获取 commit-syntax-prompt 提示文件源路径
+        let assets_commit_syntax_prompt_path = if in_test {
+            // 在测试环境中，使用测试资源路径
+            let test_dir = std::env::current_dir().unwrap_or_default();
+            // 优先使用环境变量指定的路径
+            if let Ok(path) = std::env::var("GITIE_ASSETS_COMMIT_SYNTAX_PROMPT") {
+                PathBuf::from(path)
+            } else {
+                // 否则使用当前目录下的测试资源
+                test_dir.join("test_assets/commit-syntax-prompt")
+            }
+        } else {
+            // 在正常环境中，使用标准资源路径
+            PathBuf::from(
+                std::env::var("GITIE_ASSETS_COMMIT_SYNTAX_PROMPT")
+                    .unwrap_or_else(|_| COMMIT_SYNTAX_PROMPT_EXAMPLE_FILE_NAME.to_string()),
+            )
+        };
 
         // 检查源文件是否存在
         if !assets_config_path.exists() {
@@ -238,6 +326,19 @@ impl AppConfig {
                 io::Error::new(
                     ErrorKind::NotFound,
                     "Git master prompt template file not found",
+                ),
+            ));
+        }
+        
+        if !assets_commit_syntax_prompt_path.exists() {
+            return Err(ConfigError::FileRead(
+                format!(
+                    "Commit syntax prompt template not found at {}",
+                    assets_commit_syntax_prompt_path.display()
+                ),
+                io::Error::new(
+                    ErrorKind::NotFound,
+                    "Commit syntax prompt template file not found",
                 ),
             ));
         }
@@ -293,6 +394,22 @@ impl AppConfig {
                     "Failed to copy source git-master prompt file {} to target prompt file {}",
                     assets_git_master_prompt_path.display(),
                     user_git_master_prompt_path.display()
+                ),
+                e,
+            )
+        })?;
+        
+        // 复制 commit-syntax 提示文件
+        fs::copy(
+            &assets_commit_syntax_prompt_path,
+            &user_commit_syntax_prompt_path,
+        )
+        .map_err(|e| {
+            ConfigError::FileWrite(
+                format!(
+                    "Failed to copy source commit-syntax prompt file {} to target prompt file {}",
+                    assets_commit_syntax_prompt_path.display(),
+                    user_commit_syntax_prompt_path.display()
                 ),
                 e,
             )
@@ -355,6 +472,11 @@ impl AppConfig {
             partial_config.ai = Some(PartialAIConfig::default());
         }
 
+        // 确保 Tree-sitter 部分存在
+        if partial_config.tree_sitter.is_none() {
+            partial_config.tree_sitter = Some(PartialTreeSitterConfig::default());
+        }
+
         // 加载所有提示文件
         let mut prompts = HashMap::new();
 
@@ -377,7 +499,7 @@ impl AppConfig {
             .unwrap_or("qwen3:32b-q8_0".to_string());
         let temperature = partial_ai_config.temperature.unwrap_or(0.7);
 
-        // 构建最终配置
+        // 构建最终 AI 配置
         let ai_config = AIConfig {
             api_url,
             model_name,
@@ -385,8 +507,18 @@ impl AppConfig {
             api_key: partial_ai_config.api_key,
         };
 
+        // 构建 Tree-sitter 配置
+        let partial_tree_sitter_config = partial_config.tree_sitter.unwrap_or_default();
+        let tree_sitter_config = TreeSitterConfig {
+            enabled: partial_tree_sitter_config.enabled.unwrap_or(false),
+            analysis_depth: partial_tree_sitter_config.analysis_depth.unwrap_or_else(default_analysis_depth),
+            cache_enabled: partial_tree_sitter_config.cache_enabled.unwrap_or(true),
+            languages: partial_tree_sitter_config.languages.unwrap_or_else(default_languages),
+        };
+
         Ok(Self {
             ai: ai_config,
+            tree_sitter: tree_sitter_config,
             prompts,
         })
     }

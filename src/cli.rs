@@ -31,6 +31,11 @@ pub struct CommitArgs {
     #[clap(long)]
     pub noai: bool,
 
+    /// Enable Tree-sitter syntax analysis for improved commit messages.
+    /// Optional value can specify analysis depth: 'shallow', 'medium' (default), or 'deep'.
+    #[clap(short = 't', long = "tree-sitter", value_name = "LEVEL")]
+    pub tree_sitter: Option<String>,
+
     /// Automatically stage all tracked, modified files before commit (like git commit -a).
     #[clap(short = 'a', long = "all")]
     pub auto_stage: bool,
@@ -71,4 +76,44 @@ pub fn args_contain_noai(args: &[String]) -> bool {
 #[inline]
 pub fn should_use_ai(args: &[String]) -> bool {
     !args_contain_noai(args)
+}
+
+/// Checks if a slice of string arguments contains "--tree-sitter" or "-t".
+#[inline]
+pub fn args_contain_tree_sitter(args: &[String]) -> bool {
+    for (i, arg) in args.iter().enumerate() {
+        if arg == "--tree-sitter" || arg == "-t" {
+            return true;
+        }
+        // Check for combined short options that include 't'
+        if arg.starts_with('-') && !arg.starts_with("--") && arg.contains('t') {
+            return true;
+        }
+    }
+    false
+}
+
+/// Extracts the Tree-sitter analysis level from command line arguments.
+/// Returns None if no level is specified, or the level string otherwise.
+#[inline]
+pub fn get_tree_sitter_level(args: &[String]) -> Option<String> {
+    for (i, arg) in args.iter().enumerate() {
+        if arg == "--tree-sitter" && i + 1 < args.len() {
+            let next = &args[i + 1];
+            if !next.starts_with('-') {
+                return Some(next.clone());
+            }
+        }
+        if arg.starts_with("--tree-sitter=") {
+            return Some(arg.trim_start_matches("--tree-sitter=").to_string());
+        }
+    }
+    None
+}
+
+/// Determines if Tree-sitter functionality should be used based on command line arguments.
+/// Returns true if Tree-sitter should be used, false if not.
+#[inline]
+pub fn should_use_tree_sitter(args: &[String]) -> bool {
+    args_contain_tree_sitter(args)
 }
