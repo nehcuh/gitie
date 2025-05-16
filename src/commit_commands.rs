@@ -22,7 +22,7 @@ pub async fn handle_commit_passthrough(
     context_msg: String,
 ) -> Result<(), AppError> {
     tracing::info!(
-        "Commit passthrough {}: msg: {:?}, args: {:?}",
+        "提交传递 {}: 消息: {:?}, 参数: {:?}",
         context_msg,
         args.message,
         args.passthrough_args
@@ -59,14 +59,14 @@ pub async fn handle_commit_passthrough(
         .status()
         .map_err(|e| AppError::IO(format!("Failed git {}", cmd_desc), e))?;
     if !status.success() {
-        tracing::error!("Passthrough git {} failed with status {}", cmd_desc, status);
+        tracing::error!("传递 git {} 失败，状态码 {}", cmd_desc, status);
         return Err(AppError::Git(GitError::PassthroughFailed {
             command: format!("git {}", cmd_desc),
             status_code: status.code(),
         }));
     }
     tracing::info!(
-        "Passthrough git {} initiated/completed successfully.",
+        "传递 git {} 已成功启动/完成。",
         cmd_desc
     );
     Ok(())
@@ -86,10 +86,10 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
     // Use AI by default unless --noai is specified
     // Note: The --ai flag is kept for backward compatibility
     if !args.noai {
-        tracing::info!("AI commit: Attempting to generate message (default behavior)...");
+        tracing::info!("AI 提交: 正在尝试生成消息（默认行为）...");
         // Handle auto-staging functionality
         if args.auto_stage {
-            tracing::info!("Auto-staging tracked changes due to -a/--all flag");
+            tracing::info!("由于使用了 -a/--all 标志，正在自动暂存已跟踪的更改");
             let add_result = StdCommand::new("git")
                 .arg("add")
                 .arg("-u")
@@ -97,7 +97,7 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
                 .map_err(|e| AppError::IO("Failed to auto-stage changes".to_string(), e))?;
 
             if !add_result.status.success() {
-                tracing::error!("Failed to auto-stage changes with git add -u");
+                tracing::error!("使用 git add -u 自动暂存更改失败");
                 return Err(map_output_to_git_command_error("git add -u", add_result).into());
             }
         }
@@ -108,12 +108,12 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
             .output()
             .map_err(|e| AppError::Git(GitError::DiffError(e)))?;
         if !diff_out.status.success() {
-            tracing::error!("Error getting git diff. Is anything staged for commit?");
+            tracing::error!("获取 git diff 时出错。是否有任何更改已暂存以供提交？");
             return Err(map_output_to_git_command_error("git diff --staged", diff_out).into());
         }
         let diff = String::from_utf8_lossy(&diff_out.stdout);
         if diff.trim().is_empty() {
-            tracing::info!("AI commit: No staged changes. Checking for --allow-empty.");
+            tracing::info!("AI 提交: 没有暂存的更改。检查是否使用了 --allow-empty。");
             if args.passthrough_args.contains(&"--allow-empty".to_string()) {
                 let passthrough_commit_args = CommitArgs {
                     ai: false,
@@ -137,7 +137,7 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
             ChatMessage {
                 role: "system".to_string(),
                 content: config.prompts.get("commit").cloned().unwrap_or_else(|| {
-                    tracing::warn!("Commit prompt not found in config, using empty string");
+                    tracing::warn!("在配置中未找到提交提示词，使用空字符串");
                     "".to_string()
                 }),
             },
@@ -170,7 +170,7 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
         if !ai_resp.status().is_success() {
             let code = ai_resp.status();
             let body = ai_resp.text().await.unwrap_or_else(|_| "<no body>".into());
-            tracing::error!("AI API request failed with status {}: {}", code, body);
+            tracing::error!("AI API 请求失败，状态码 {}: {}", code, body);
             return Err(AppError::AI(AIError::ApiResponseError(code, body)));
         }
 
@@ -182,10 +182,10 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
         let final_msg = clean_ai_output(ai_msg).trim().to_string();
 
         if final_msg.is_empty() {
-            tracing::error!("AI returned an empty message.");
+            tracing::error!("AI 返回了空消息。");
             return Err(AppError::AI(AIError::EmptyMessage));
         }
-        tracing::info!("AI Message:\n---\n{}\n---", final_msg);
+        tracing::info!("AI 消息:\n---\n{}\n---", final_msg);
 
         let mut cmd_builder = StdCommand::new("git");
         cmd_builder.arg("commit").arg("-m").arg(&final_msg);
@@ -204,10 +204,10 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
             .output()
             .map_err(|e| AppError::IO("AI commit failed".into(), e))?;
         if !commit_out.status.success() {
-            tracing::error!("Git commit command with AI message failed.");
+            tracing::error!("带有 AI 消息的 Git commit 命令失败。");
             return Err(map_output_to_git_command_error("git commit -m <AI>", commit_out).into());
         }
-        tracing::info!("Successfully committed with AI message.");
+        tracing::info!("使用 AI 消息成功提交。");
     } else {
         return handle_commit_passthrough(args, "(standard commit with --noai)".to_string()).await;
     }

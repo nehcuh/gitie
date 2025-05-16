@@ -87,7 +87,7 @@ impl AppConfig {
             && user_git_master_prompt_path.exists()
         {
             info!(
-                "User configuration already exists at: {:?}\n User commit-prompt already exists at: {:?}\n User explanation-prompt already exists at: {:?}\n User git-master-prompt already exists at: {:?}",
+                "用户配置已存在于: {:?}\n 用户 commit-prompt 已存在于: {:?}\n 用户 explanation-prompt 已存在于: {:?}\n 用户 git-master-prompt 已存在于: {:?}",
                 user_config_path, user_commit_prompt_path, user_explanation_prompt_path, user_git_master_prompt_path
             );
             return Ok((user_config_path, user_prompt_paths));
@@ -111,7 +111,7 @@ impl AppConfig {
 
         // 初始化配置文件
         if !user_config_path.exists() {
-            info!("User configuration file does not exist. Initializing...");
+            info!("用户配置文件不存在。正在初始化...");
         }
 
         // 检查我们是否在测试环境中
@@ -307,7 +307,7 @@ impl AppConfig {
 
         // 2. 从用户目录加载配置
         info!(
-            "Loading configuration from user directory: {:?}",
+            "正在从用户目录加载配置: {:?}",
             user_config_path
         );
         Self::load_config_from_file(&user_config_path, &user_prompt_paths)
@@ -344,7 +344,7 @@ impl AppConfig {
                 if api_key == "YOUR_API_KEY_IF_NEEDED" || api_key.is_empty() {
                     ai.api_key = None;
                     tracing::info!(
-                        "API key placeholder or empty string found. Treating as no API key."
+                        "发现 API 密钥占位符或空字符串。视为无 API 密钥。"
                     );
                 }
             }
