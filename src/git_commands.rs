@@ -21,10 +21,10 @@ use crate::{
 /// # Example
 ///
 /// ```
-/// use crate::git_commands::execute_git_command_and_capture_output;
+/// use gitie::git_commands::execute_git_command_and_capture_output;
 ///
 /// let args = vec!["status".to_string(), "--short".to_string()];
-/// match execute_git_command_and_capture_outputs(&args) {
+/// match execute_git_command_and_capture_output(&args) {
 ///     Ok(output) => println!("Git status: {}", output.stdout),
 ///     Err(err) => eprintln!("Error: {}", err)
 /// }

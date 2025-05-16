@@ -220,15 +220,21 @@ fn test_help_with_noai_disables_ai() {
     // The output should be standard git help without AI explanation
     let stdout = String::from_utf8_lossy(&output.stdout);
     
-    // Standard git help typically starts with "usage: git commit"
-    assert!(stdout.contains("usage: git commit"), 
+    // Print the actual output for debugging
+    println!("HELP OUTPUT WITH --NOAI:\n{}", stdout);
+    
+    // Git help can be displayed in different formats (man page or usage)
+    // For man page format, it typically contains "GIT-COMMIT(1)" header
+    // For usage format, it typically starts with "usage: git commit"
+    assert!(stdout.contains("GIT-COMMIT(1)") || 
+            stdout.contains("usage: git commit"), 
             "Help output should be standard git help without AI explanations");
     
     // The exact format of Git help output can vary, but it typically 
     // contains git command syntax and doesn't have AI-specific language
-    // Just check that it contains standard git help content
-    assert!(stdout.contains("git commit") || 
-            stdout.contains("usage:") ||
-            stdout.contains("options:"),
+    // Just check that it contains standard git help elements
+    assert!(stdout.contains("Record changes to the repository") || 
+            stdout.contains("OPTIONS") || 
+            stdout.contains("DESCRIPTION"),
             "Help output should contain standard git help elements");
 }
