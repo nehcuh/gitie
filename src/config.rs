@@ -12,9 +12,11 @@ const USER_CONFIG_DIR: &str = ".config/gitie";
 const USER_CONFIG_FILE_NAME: &str = "config.toml";
 const USER_COMMIT_PROMPT_FILE_NAME: &str = "commit-prompt";
 const USER_EXPLANATION_PROMPT_FILE_NAME: &str = "commit-prompt";
+const USER_GIT_MASTER_PROMPT_FILE_NAME: &str = "git-master-prompt";
 const CONFIG_EXAMPLE_FILE_NAME: &str = "assets/config.example.toml";
 const COMMIT_PROMPT_EXAMPLE_FILE_NAME: &str = "assets/commit-prompt";
 const EXPLANATION_PROMPT_EXAMPLE_FILE_NAME: &str = "assets/explanation-prompt";
+const GIT_MASTER_PROMPT_EXAMPLE_FILE_NAME: &str = "assets/git-master-prompt";
 
 // AI 服务配置
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -64,6 +66,8 @@ impl AppConfig {
         let user_commit_prompt_path = Self::get_user_file_path(USER_COMMIT_PROMPT_FILE_NAME)?;
         let user_explanation_prompt_path =
             Self::get_user_file_path(USER_EXPLANATION_PROMPT_FILE_NAME)?;
+        let user_git_master_prompt_path = 
+            Self::get_user_file_path(USER_GIT_MASTER_PROMPT_FILE_NAME)?;
 
         let mut user_prompt_paths = HashMap::new();
         user_prompt_paths.insert("commit".to_string(), user_commit_prompt_path.clone());
@@ -71,15 +75,20 @@ impl AppConfig {
             "explanation".to_string(),
             user_explanation_prompt_path.clone(),
         );
+        user_prompt_paths.insert(
+            "git-master".to_string(),
+            user_git_master_prompt_path.clone(),
+        );
 
         // 如果用户配置已存在，则直接返回路径
         if user_config_path.exists()
             && user_commit_prompt_path.exists()
             && user_explanation_prompt_path.exists()
+            && user_git_master_prompt_path.exists()
         {
             info!(
-                "User configuration already exists at: {:?}\n User commit-prompt already exists at: {:?}\n User explanation-prompt already exists at: {:?}",
-                user_config_path, user_commit_prompt_path, user_explanation_prompt_path
+                "User configuration already exists at: {:?}\n User commit-prompt already exists at: {:?}\n User explanation-prompt already exists at: {:?}\n User git-master-prompt already exists at: {:?}",
+                user_config_path, user_commit_prompt_path, user_explanation_prompt_path, user_git_master_prompt_path
             );
             return Ok((user_config_path, user_prompt_paths));
         }
@@ -166,6 +175,25 @@ impl AppConfig {
                     .unwrap_or_else(|_| EXPLANATION_PROMPT_EXAMPLE_FILE_NAME.to_string()),
             )
         };
+        
+        // 获取 git-master-prompt 提示文件源路径
+        let assets_git_master_prompt_path = if in_test {
+            // 在测试环境中，使用测试资源路径
+            let test_dir = std::env::current_dir().unwrap_or_default();
+            // 优先使用环境变量指定的路径
+            if let Ok(path) = std::env::var("GITIE_ASSETS_GIT_MASTER_PROMPT") {
+                PathBuf::from(path)
+            } else {
+                // 否则使用当前目录下的测试资源
+                test_dir.join("test_assets/git-master-prompt")
+            }
+        } else {
+            // 在正常环境中，使用标准资源路径
+            PathBuf::from(
+                std::env::var("GITIE_ASSETS_GIT_MASTER_PROMPT")
+                    .unwrap_or_else(|_| GIT_MASTER_PROMPT_EXAMPLE_FILE_NAME.to_string()),
+            )
+        };
 
         // 检查源文件是否存在
         if !assets_config_path.exists() {
@@ -197,6 +225,19 @@ impl AppConfig {
                 io::Error::new(
                     ErrorKind::NotFound,
                     "Explanation prompt template file not found",
+                ),
+            ));
+        }
+
+        if !assets_git_master_prompt_path.exists() {
+            return Err(ConfigError::FileRead(
+                format!(
+                    "Git master prompt template not found at {}",
+                    assets_git_master_prompt_path.display()
+                ),
+                io::Error::new(
+                    ErrorKind::NotFound,
+                    "Git master prompt template file not found",
                 ),
             ));
         }
@@ -236,6 +277,22 @@ impl AppConfig {
                     "Failed to copy source explanation prompt file {} to target prompt file {}",
                     assets_explanation_prompt_path.display(),
                     user_explanation_prompt_path.display()
+                ),
+                e,
+            )
+        })?;
+
+        // 复制 git-master 提示文件
+        fs::copy(
+            &assets_git_master_prompt_path,
+            &user_git_master_prompt_path,
+        )
+        .map_err(|e| {
+            ConfigError::FileWrite(
+                format!(
+                    "Failed to copy source git-master prompt file {} to target prompt file {}",
+                    assets_git_master_prompt_path.display(),
+                    user_git_master_prompt_path.display()
                 ),
                 e,
             )

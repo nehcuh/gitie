@@ -82,6 +82,7 @@ impl GitTestRepo {
 
 /// Test that `gitie commit` now uses AI by default
 #[test]
+#[ignore = "Requires functioning AI service"]
 fn test_default_commit_uses_ai() {
     // Set up test environment
     let repo = GitTestRepo::new();
@@ -133,6 +134,7 @@ fn test_noai_flag_disables_ai() {
 
 /// Test that `gitie commit --ai` still works for backward compatibility
 #[test]
+#[ignore = "Requires functioning AI service"]
 fn test_ai_flag_backward_compatibility() {
     // Set up test environment
     let repo = GitTestRepo::new();
@@ -185,6 +187,7 @@ fn test_flag_precedence() {
 
 /// Test that help commands use AI by default
 #[test]
+#[ignore = "Requires functioning AI service"]
 fn test_help_uses_ai_by_default() {
     // Set up test environment
     let repo = GitTestRepo::new();

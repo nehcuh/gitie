@@ -52,13 +52,7 @@ pub enum AIError {
     ExplainerNetworkError(String), // For network errors from explainer not covered by reqwest::Error
 }
 
-#[allow(unused)]
-#[derive(Debug)]
-pub enum IOError {}
 
-#[allow(unused)]
-#[derive(Debug)]
-pub enum Generic {}
 
 impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
