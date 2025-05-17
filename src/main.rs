@@ -203,9 +203,12 @@ async fn main() -> Result<(), AppError> {
         tracing::info!("检测到commit命令");
         
         // 重构commit命令参数以便使用clap解析
-        let mut commit_args_vec = vec!["gitie".to_string()];
-        for arg in filtered_args.iter().filter(|a| *a != "commit") {
-            commit_args_vec.push(arg.clone());
+        let mut commit_args_vec = vec!["gitie".to_string(), "commit".to_string()];
+        
+        // 获取commit之后的所有其他参数
+        let commit_index = filtered_args.iter().position(|a| a == "commit").unwrap_or(0);
+        if commit_index + 1 < filtered_args.len() {
+            commit_args_vec.extend_from_slice(&filtered_args[commit_index + 1..]);
         }
         
         tracing::debug!("重构的commit命令: {:?}", commit_args_vec);
@@ -226,13 +229,13 @@ async fn main() -> Result<(), AppError> {
                 _ => {}
             }
         } else {
-            tracing::warn!("解析commit命令失败，将创建默认commit命令");
-            // 即使解析失败，也应该处理为commit命令
-            // 过滤掉 "commit" 命令本身，确保不会成为 passthrough_args 的一部分
-            let passthrough_args: Vec<String> = filtered_args.iter()
-                .filter(|&arg| arg != "commit")
-                .cloned()
-                .collect();
+            tracing::info!("无法解析标准参数格式，将使用默认commit命令");
+            // 获取commit之后的所有其他参数作为passthrough
+            let mut passthrough_args = Vec::new();
+            let commit_index = filtered_args.iter().position(|a| a == "commit").unwrap_or(0);
+            if commit_index + 1 < filtered_args.len() {
+                passthrough_args = filtered_args[commit_index + 1..].to_vec();
+            }
             
             let default_commit_args = CommitArgs {
                 ai: !filtered_args.contains(&"--noai".to_string()),
