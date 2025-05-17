@@ -91,17 +91,17 @@ pub struct ReviewArgs {
     #[clap(long = "review-ts")]
     pub review_ts: bool,
 
-    /// Allow all other flags and arguments to be passed through to git.
-    #[clap(allow_hyphen_values = true, last = true)]
-    pub passthrough_args: Vec<String>,
-
     /// First commit reference
-    #[clap(index = 1)]
+    #[clap(long, value_name = "COMMIT")]
     pub commit1: Option<String>,
 
     /// Second commit reference (if comparing two commits)
-    #[clap(index = 2)]
+    #[clap(long, value_name = "COMMIT")]
     pub commit2: Option<String>,
+
+    /// Allow all other flags and arguments to be passed through to git.
+    #[clap(allow_hyphen_values = true, last = true)]
+    pub passthrough_args: Vec<String>,
 }
 
 /// Checks if a slice of string arguments contains "-h" or "--help".

@@ -161,9 +161,12 @@ async fn main() -> Result<(), AppError> {
         tracing::info!("检测到review命令");
         
         // 重构review命令参数以便使用clap解析
-        let mut review_args_vec = vec!["gitie".to_string()];
-        for arg in filtered_args.iter().filter(|a| *a != "review") {
-            review_args_vec.push(arg.clone());
+        let mut review_args_vec = vec!["gitie".to_string(), "review".to_string()];
+        
+        // 获取review之后的所有其他参数
+        let review_index = filtered_args.iter().position(|a| a == "review").unwrap_or(0);
+        if review_index + 1 < filtered_args.len() {
+            review_args_vec.extend_from_slice(&filtered_args[review_index + 1..]);
         }
         
         tracing::debug!("重构的review命令: {:?}", review_args_vec);
@@ -177,7 +180,21 @@ async fn main() -> Result<(), AppError> {
             }
         } else {
             tracing::warn!("解析review命令失败");
-            // 如果解析失败，我们默认传递给git，让git报错
+            // 创建默认的ReviewArgs
+            let default_review_args = ReviewArgs {
+                depth: "normal".to_string(),
+                focus: None,
+                lang: None,
+                format: "text".to_string(),
+                output: None,
+                tree_sitter: false,
+                no_tree_sitter: false,
+                review_ts: false,
+                passthrough_args: vec![],
+                commit1: None,
+                commit2: None,
+            };
+            return handle_review(default_review_args, &config).await;
         }
     }
     
