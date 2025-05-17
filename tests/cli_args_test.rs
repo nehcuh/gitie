@@ -1,4 +1,4 @@
-use gitie::cli::{args_contain_help, args_contain_ai, args_contain_noai, should_use_ai};
+use gitie::cli_interface::args::{args_contain_help, args_contain_ai, args_contain_noai, should_use_ai};
 
 #[test]
 fn test_args_contain_help() {

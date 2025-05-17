@@ -9,6 +9,43 @@
 -   **Configurable**: Allows customization of the AI model, API endpoint, temperature, and system prompts.
 -   **AI-Powered Command Explanation**: Get AI-generated explanations for Git commands and their options directly in your terminal.
 -   **Tracing/Logging**: Provides detailed logs for debugging and monitoring.
+-   **Code Analysis**: Uses Tree-sitter to provide code structure analysis for more intelligent commit messages.
+
+## Project Architecture
+
+`gitie` is organized into a modular architecture for better maintainability and flexibility:
+
+```
+gitie/src/
+├── main.rs               # Application entry point
+├── lib.rs                # Library exports
+├── ai_module/            # AI-related functionality
+│   ├── mod.rs            # Module definitions
+│   ├── explainer.rs      # AI explanation features
+│   └── utils.rs          # AI utility functions
+├── cli_interface/        # Command-line interface
+│   ├── mod.rs            # Module definitions
+│   ├── args.rs           # Command-line argument parsing
+│   └── ui.rs             # User interface helpers
+├── command_processing/   # Command handlers
+│   ├── mod.rs            # Module definitions
+│   └── commit.rs         # Commit command handling
+├── config_management/    # Configuration
+│   ├── mod.rs            # Module definitions
+│   └── settings.rs       # Configuration loading and management
+├── core/                 # Core functionality
+│   ├── mod.rs            # Module definitions
+│   ├── errors.rs         # Error types
+│   └── types.rs          # Common type definitions
+├── git_module/           # Git operations
+│   └── mod.rs            # Git command execution
+└── tree_sitter_analyzer/ # Code analysis
+    ├── mod.rs            # Module definitions
+    ├── analyzer.rs       # Analysis logic
+    ├── core.rs           # Analysis data structures
+    ├── java.rs           # Java language support
+    └── rust.rs           # Rust language support
+```
 
 ## Installation
 

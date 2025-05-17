@@ -9,6 +9,43 @@
 -   **标准 Git Commit 传递**：与您现有的 `git commit` 工作流无缝集成。如果您不使用 AI 功能，它的行为与标准 `git commit` 相同。
 -   **可配置**：允许自定义 AI 模型、API 端点、temperature (温度) 和系统提示。
 -   **追踪/日志**：提供详细的日志用于调试和监控。
+-   **代码分析**：使用 Tree-sitter 提供代码结构分析，生成更智能的提交信息。
+
+## 项目架构
+
+`gitie` 采用模块化架构设计，以提高可维护性和灵活性：
+
+```
+gitie/src/
+├── main.rs               # 应用程序入口点
+├── lib.rs                # 库导出
+├── ai_module/            # AI 相关功能
+│   ├── mod.rs            # 模块定义
+│   ├── explainer.rs      # AI 解释功能
+│   └── utils.rs          # AI 工具函数
+├── cli_interface/        # 命令行接口
+│   ├── mod.rs            # 模块定义
+│   ├── args.rs           # 命令行参数解析
+│   └── ui.rs             # 用户界面辅助函数
+├── command_processing/   # 命令处理
+│   ├── mod.rs            # 模块定义
+│   └── commit.rs         # 提交命令处理
+├── config_management/    # 配置管理
+│   ├── mod.rs            # 模块定义
+│   └── settings.rs       # 配置加载和管理
+├── core/                 # 核心功能
+│   ├── mod.rs            # 模块定义
+│   ├── errors.rs         # 错误类型
+│   └── types.rs          # 通用类型定义
+├── git_module/           # Git 操作
+│   └── mod.rs            # Git 命令执行
+└── tree_sitter_analyzer/ # 代码分析
+    ├── mod.rs            # 模块定义
+    ├── analyzer.rs       # 分析逻辑
+    ├── core.rs           # 分析数据结构
+    ├── java.rs           # Java 语言支持
+    └── rust.rs           # Rust 语言支持
+```
 
 ## 安装
 
@@ -179,11 +216,14 @@ graph TD
 
 ## 开发
 
-有关项目结构、贡献指南等更多详细信息，请参阅 `doc/DEVELOPMENT.md`。
+有关项目结构、贡献指南等更多详细信息，请参阅 `doc/development/` 目录下的文档：
+- `development_guide.md`：详细的项目架构和开发指南
+- `quickstart.md`：快速入门指南
+- `module_reference.md`：模块参考指南
 
 ### 开发者快速链接
 - 构建: `cargo build`
-- 运行测试: `cargo test` (添加测试后)
+- 运行测试: `cargo test`
 - 格式化: `cargo fmt`
 - 代码检查: `cargo clippy`
 

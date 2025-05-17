@@ -31,22 +31,44 @@ Gitie 是一个 Rust 项目，主要结构如下：
 ```
 gitie/
 ├── assets/                # 提示词模板和配置示例
-│   ├── commit-prompt      # 提交信息生成的提示词
-│   ├── explanation-prompt # 命令解释的提示词
-│   ├── git-master-prompt  # Git错误解释的提示词
+│   ├── commit-message-generator.md  # 提交信息生成的提示词
+│   ├── git-ai-helper.md   # 命令解释的提示词
+│   ├── expert-prompt.md   # Git错误解释的提示词
+│   ├── commit-syntax.md   # 提交语法验证的提示词
 │   └── config.example.toml # 配置示例文件
 ├── src/                   # 源代码
 │   ├── main.rs            # 程序入口点
 │   ├── lib.rs             # 库入口点，公开核心模块
-│   ├── ai_explainer.rs    # AI 解释功能
-│   ├── ai_utils.rs        # AI 工具函数
-│   ├── cli.rs             # 命令行参数处理
-│   ├── commit_commands.rs # 提交相关命令
-│   ├── config.rs          # 配置加载与处理
-│   ├── errors.rs          # 错误类型定义
-│   ├── git_commands.rs    # Git 命令执行
-│   └── types.rs           # 通用类型定义
+│   ├── ai_module/         # AI相关功能
+│   │   ├── mod.rs         # 模块定义
+│   │   ├── explainer.rs   # AI解释功能
+│   │   └── utils.rs       # AI工具函数
+│   ├── cli_interface/     # 命令行接口功能
+│   │   ├── mod.rs         # 模块定义
+│   │   ├── args.rs        # 命令行参数定义和解析
+│   │   └── ui.rs          # 用户界面辅助函数
+│   ├── command_processing/ # 命令处理功能
+│   │   ├── mod.rs         # 模块定义
+│   │   └── commit.rs      # 提交命令处理
+│   ├── config_management/ # 配置管理
+│   │   ├── mod.rs         # 模块定义
+│   │   └── settings.rs    # 配置加载与处理
+│   ├── core/              # 核心功能
+│   │   ├── mod.rs         # 模块定义
+│   │   ├── errors.rs      # 错误类型定义
+│   │   └── types.rs       # 通用类型定义
+│   ├── git_module/        # Git交互功能
+│   │   └── mod.rs         # Git操作模块定义
+│   └── tree_sitter_analyzer/ # Tree-sitter代码分析
+│       ├── mod.rs         # 模块定义
+│       ├── analyzer.rs    # 分析逻辑
+│       ├── core.rs        # 核心数据结构
+│       ├── java.rs        # Java语言支持
+│       └── rust.rs        # Rust语言支持
 ├── tests/                 # 集成测试
+│   ├── cli_args_test.rs   # 命令行参数测试
+│   ├── default_ai_behavior_test.rs # AI行为测试
+│   └── tree_sitter_tests.rs # Tree-sitter功能测试
 └── doc/                   # 项目文档
 ```
 
@@ -55,17 +77,19 @@ gitie/
 ### 程序流程
 
 1. **入口点**: `main.rs` 处理命令行参数，初始化日志，并调用相应的功能模块
-2. **命令解析**: `cli.rs` 使用 clap 定义命令行结构和参数
-3. **配置管理**: `config.rs` 负责加载和管理配置
-4. **命令执行**: `git_commands.rs` 包含 Git 命令执行函数
-5. **AI 交互**: `ai_explainer.rs` 和 `ai_utils.rs` 处理与 AI 服务的交互
+2. **命令解析**: `cli_interface/args.rs` 使用 clap 定义命令行结构和参数
+3. **配置管理**: `config_management/settings.rs` 负责加载和管理配置
+4. **命令执行**: `git_module/mod.rs` 包含 Git 命令执行函数
+5. **AI 交互**: `ai_module/explainer.rs` 和 `ai_module/utils.rs` 处理与 AI 服务的交互
+6. **代码分析**: `tree_sitter_analyzer/analyzer.rs` 处理代码结构分析
 
 ### 主要功能模块
 
-- **AI 辅助提交**: `commit_commands.rs` 中的 `handle_commit` 函数
-- **命令解释**: `ai_explainer.rs` 中的 `explain_git_command` 函数
-- **错误解释**: `ai_explainer.rs` 中的 `explain_git_error` 函数
-- **Git命令执行**: `git_commands.rs` 中的各种执行函数
+- **AI 辅助提交**: `command_processing/commit.rs` 中的 `handle_commit` 函数
+- **命令解释**: `ai_module/explainer.rs` 中的 `explain_git_command` 函数
+- **错误解释**: `ai_module/explainer.rs` 中的 `explain_git_error` 函数
+- **Git命令执行**: `git_module/mod.rs` 中的各种执行函数
+- **代码分析**: `tree_sitter_analyzer/analyzer.rs` 提供的代码结构分析功能
 
 ## 4. 添加新功能步骤
 
@@ -74,18 +98,20 @@ gitie/
 1. 明确功能定义和范围
 2. 检查 `doc/requirements` 目录了解需求文档格式
 3. 创建新的需求文档和用户故事
+4. 考虑功能是否需要利用 Tree-sitter 代码分析
 
 ### 步骤二：设计解决方案
 
 1. 确定修改哪些模块或创建新模块
 2. 设计函数和数据流
 3. 创建设计文档，保存在 `doc/design` 目录
+4. 考虑如何在模块化结构中集成新功能
 
 ### 步骤三：实现功能
 
 1. **添加命令行选项** (如果需要)
    ```rust
-   // 在 cli.rs 中:
+   // 在 cli_interface/args.rs 中:
    pub struct YourNewCommand {
        #[clap(long, help = "功能描述")]
        pub your_option: bool,
@@ -94,7 +120,7 @@ gitie/
 
 2. **实现核心功能**
    ```rust
-   // 在你创建的新模块 your_feature.rs 或现有模块中:
+   // 在你创建的新模块 command_processing/your_feature.rs 或现有模块中:
    pub async fn handle_your_feature(args: YourNewCommand, config: &AppConfig) -> Result<(), AppError> {
        // 实现你的功能
        Ok(())
@@ -148,7 +174,7 @@ gitie/
 
 假设我们要添加一个新命令 `gitie branch-info` 来显示分支信息。
 
-### 1. 更新命令行定义 (cli.rs)
+### 1. 更新命令行定义 (cli_interface/args.rs)
 
 ```rust
 // 在 GitieSubCommand 枚举中添加新命令
@@ -171,18 +197,19 @@ pub struct BranchInfoArgs {
 }
 ```
 
-### 2. 创建功能模块 (branch_commands.rs)
+### 2. 创建功能模块 (command_processing/branch_info.rs)
 
 ```rust
 use crate::{
-    cli::BranchInfoArgs,
-    config::AppConfig,
-    errors::AppError,
+    cli_interface::args::BranchInfoArgs,
+    config_management::settings::AppConfig,
+    core::errors::AppError,
+    ai_module::explainer,
 };
 
 pub async fn handle_branch_info(args: BranchInfoArgs, config: &AppConfig) -> Result<(), AppError> {
     // 实现分支信息获取和显示逻辑
-    // 如果需要AI解释，调用ai_explainer中的函数
+    // 如果需要AI解释，调用ai_module/explainer.rs中的函数
     
     Ok(())
 }
@@ -191,9 +218,8 @@ pub async fn handle_branch_info(args: BranchInfoArgs, config: &AppConfig) -> Res
 ### 3. 集成到主流程 (main.rs)
 
 ```rust
-// 添加模块引用
-mod branch_commands;
-use crate::branch_commands::handle_branch_info;
+// 确保模块被引入
+use crate::command_processing::branch_info::handle_branch_info;
 
 // 在 run_app 函数中更新 match 逻辑
 match parsed_args.command {
@@ -226,7 +252,8 @@ mod tests {
 
 - **配置问题**: 确保 `config.toml` 中正确配置了 AI 服务
 - **API 连接**: 检查网络和 API key 是否正确
-- **提示词调试**: 修改 `assets` 目录中的提示词模板
+- **提示词调试**: 修改 `assets` 目录中的提示词模板文件（如 `commit-message-generator.md`）
+- **代码分析问题**: 确保 Tree-sitter 相关功能配置正确
 
 ### Rust 相关问题
 

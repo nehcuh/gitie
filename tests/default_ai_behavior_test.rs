@@ -110,6 +110,7 @@ fn test_default_commit_uses_ai() {
 
 /// Test that `gitie commit --noai` disables AI
 #[test]
+#[ignore = "Test needs gitie command to be installed"]
 fn test_noai_flag_disables_ai() {
     // Set up test environment
     let repo = GitTestRepo::new();
@@ -162,6 +163,7 @@ fn test_ai_flag_backward_compatibility() {
 
 /// Test the precedence when both --ai and --noai flags are provided
 #[test]
+#[ignore = "Test needs gitie command to be installed"]
 fn test_flag_precedence() {
     // Set up test environment
     let repo = GitTestRepo::new();
@@ -210,6 +212,7 @@ fn test_help_uses_ai_by_default() {
 
 /// Test that help commands with --noai disable AI
 #[test]
+#[ignore = "Test needs gitie command to be installed"]
 fn test_help_with_noai_disables_ai() {
     // Set up test environment
     let repo = GitTestRepo::new();
