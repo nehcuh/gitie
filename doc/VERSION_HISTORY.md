@@ -10,8 +10,8 @@
 | v0.2 | 2025-05-16 | AI 默认行为优化 | 已完成 |
 | v0.3 | 2025-05-16 | 错误处理增强 | 已完成 |
 | v0.4 | 2025-05-16 | 中文本地化功能 | 已完成 |
-| v0.5 | 2025-05-17 | Tree-sitter语法分析增强 | 进行中 |
-| v0.6 | 计划中 | 高级代码分析与评审基础 | 规划中 |
+| v0.5 | 2025-05-17 | Tree-sitter语法分析增强 | 已完成 |
+| v0.6 | 计划中 | 代码评审与命令集成 | 规划中 |
 | v0.7 | 计划中 | 安全审计与代码质量分析 | 规划中 |
 | v0.8 | 计划中 | 智能重构与团队协作 | 规划中 |
 
@@ -67,19 +67,37 @@
 - [中文本地化需求](requirements/v0.4/localization_requirements.md)
 - [本地化用户体验](user_stories/v0.4/localization_user_experience.md)
 
-### v0.5 Tree-sitter语法分析增强 (2025-05-17，进行中)
+### v0.5 Tree-sitter语法分析增强 (2025-05-17，已完成)
 
 **核心改进：**
 - 集成Tree-sitter进行代码语法分析
 - 分析Git diff对项目语法树的影响
 - 使用语法理解能力优化AI commit信息生成
 - 性能优化与多语言支持
+- 支持Python, Rust, Java, C/C++, Go, JavaScript等语言
 
 **主要文档：**
 - [Tree-sitter集成需求](requirements/v0.5/tree_sitter_integration_requirements.md)
 - [语法分析设计方案](design/v0.5/tree_sitter_technical_design.md)
 - [语法分析用户故事](user_stories/v0.5/syntax_analysis_stories.md)
 - [项目路线图](ROADMAP.md)
+
+### v0.6 代码评审与命令集成 (计划中，规划中)
+
+**核心改进：**
+- 实现基础代码评审命令 (`gitie review`)
+- 评审与提交集成 (`gitie commit --review`)
+- 基于Tree-sitter的结构化代码分析
+- 代码质量、风格和安全性评估
+- 统一参数系统与Git兼容性设计
+- 交互式评审结果处理
+- 集成语言专用安全审核提示（Python, Rust, Java, C/C++, Go, JavaScript）
+
+**主要文档：**
+- [代码评审设计文档](design/v0.6/code_review_design.md)
+- [代码评审路线图](ROADMAP.md)
+- [命令集成规范](design/v0.6/command_integration.md)
+- [语言专用安全审核提示](assets/review-rust-prompt.md)
 
 ## 文档演进方向
 

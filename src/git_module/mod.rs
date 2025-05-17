@@ -154,13 +154,14 @@ pub fn passthrough_to_git_with_error_handling(
     if !output.status.success() {
         tracing::warn!("Git 命令 'git {}' 执行失败: {}", cmd_str_log, output.status);
         
-        // 始终返回命令失败错误
-        return Err(AppError::Git(GitError::CommandFailed {
-            command: format!("git {}", cmd_str_log),
-            status_code: output.status.code(),
-            stdout,
-            stderr,
-        }));
+        // 只有当不需要错误处理时才返回错误
+        if !handle_error {
+            return Err(AppError::Git(GitError::PassthroughFailed {
+                command: format!("git {}", cmd_str_log),
+                status_code: output.status.code(),
+            }));
+        }
+        // 当handle_error为true时，我们将继续执行并返回Ok结果
     }
 
     Ok(CommandOutput {
