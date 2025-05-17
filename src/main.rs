@@ -175,6 +175,12 @@ async fn main() -> Result<(), AppError> {
         } else {
             tracing::warn!("解析commit命令失败，将创建默认commit命令");
             // 即使解析失败，也应该处理为commit命令
+            // 过滤掉 "commit" 命令本身，确保不会成为 passthrough_args 的一部分
+            let passthrough_args: Vec<String> = filtered_args.iter()
+                .filter(|&arg| arg != "commit")
+                .cloned()
+                .collect();
+            
             let default_commit_args = CommitArgs {
                 ai: !filtered_args.contains(&"--noai".to_string()),
                 noai: filtered_args.contains(&"--noai".to_string()),
@@ -187,7 +193,7 @@ async fn main() -> Result<(), AppError> {
                 auto_stage: filtered_args.contains(&"--all".to_string()) 
                     || filtered_args.contains(&"-a".to_string()),
                 message: None,
-                passthrough_args: filtered_args.iter().cloned().collect(),
+                passthrough_args,
             };
             return handle_commit(default_commit_args, &config).await;
         }

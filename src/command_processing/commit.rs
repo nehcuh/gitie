@@ -6,7 +6,40 @@ use crate::{
     git_module::map_output_to_git_command_error,
     tree_sitter_analyzer::TreeSitterAnalyzer,
 };
-use std::process::Command as StdCommand;
+use std::{
+    process::Command,
+    path::PathBuf,
+};
+
+/// 为提交消息创建临时文件
+/// 
+/// 创建一个包含提交消息的临时文件
+/// 
+/// # 参数
+/// 
+/// * `message` - 提交消息内容
+/// 
+/// # 返回值
+/// 
+/// * `Result<PathBuf, AppError>` - 临时文件路径或错误
+fn create_commit_message_file(message: &str) -> Result<PathBuf, AppError> {
+    let temp_dir = std::env::temp_dir();
+    let temp_file_path = temp_dir.join(format!("gitie_commit_msg_{}.txt", std::process::id()));
+    std::fs::write(&temp_file_path, message)
+        .map_err(|e| AppError::IO("无法创建临时提交消息文件".into(), e))?;
+    Ok(temp_file_path)
+}
+
+/// 清理提交消息临时文件
+/// 
+/// # 参数
+/// 
+/// * `file_path` - 临时文件路径
+fn cleanup_commit_message_file(file_path: &PathBuf) {
+    if let Err(e) = std::fs::remove_file(file_path) {
+        tracing::warn!("无法删除临时提交消息文件: {}", e);
+    }
+}
 
 /// 判断是否是Tree-sitter相关标志
 fn is_tree_sitter_flag(arg: &str) -> bool {
@@ -82,17 +115,24 @@ pub async fn handle_commit_passthrough(
         args.passthrough_args
     );
 
-    let mut cmd_builder = StdCommand::new("git");
-    cmd_builder.arg("commit");
+    // 创建 git commit 命令参数
+    let mut git_args = vec!["commit".to_string()];
 
     // Add -a/--all flag if auto_stage is set
     if args.auto_stage {
-        cmd_builder.arg("-a");
+        git_args.push("-a".to_string());
     }
 
-    if let Some(message) = &args.message {
-        cmd_builder.arg("-m").arg(message);
-    }
+    let temp_file_path_opt = if let Some(message) = &args.message {
+        // 创建提交消息临时文件
+        let temp_file_path = create_commit_message_file(message)?;
+        
+        git_args.push("-F".to_string());
+        git_args.push(temp_file_path.to_string_lossy().to_string());
+        Some(temp_file_path)
+    } else {
+        None
+    };
 
     // Add remaining args, but exclude -a, -all if auto_stage is true, and tree-sitter flags with their values
     for (i, arg) in args.passthrough_args.iter().enumerate() {
@@ -118,26 +158,26 @@ pub async fn handle_commit_passthrough(
             // 移除 'a' 和 't'
             if let Some(filtered_arg) = create_filtered_short_option(arg, &['a', 't']) {
                 if filtered_arg != "-" {
-                    cmd_builder.arg(filtered_arg);
+                    git_args.push(filtered_arg.to_string());
                 }
             }
         } else if args.auto_stage && contains_auto_stage {
             // 如果启用了auto-stage，移除 'a'
             if let Some(filtered_arg) = create_filtered_short_option(arg, &['a']) {
                 if filtered_arg != "-" {
-                    cmd_builder.arg(filtered_arg);
+                    git_args.push(filtered_arg.to_string());
                 }
             }
         } else if contains_ts {
             // 如果包含tree-sitter选项，移除 't'
             if let Some(filtered_arg) = create_filtered_short_option(arg, &['t']) {
                 if filtered_arg != "-" {
-                    cmd_builder.arg(filtered_arg);
+                    git_args.push(filtered_arg.to_string());
                 }
             }
         } else {
             // 没有特殊处理的情况，直接添加
-            cmd_builder.arg(arg);
+            git_args.push(arg.clone());
         }
     }
 
@@ -145,16 +185,21 @@ pub async fn handle_commit_passthrough(
         "commit (passthrough {}) args: {:?}",
         context_msg, args.passthrough_args
     );
-    let status = cmd_builder
-        .status()
-        .map_err(|e| AppError::IO(format!("Failed git {}", cmd_desc), e))?;
-    if !status.success() {
-        tracing::error!("传递 git {} 失败，状态码 {}", cmd_desc, status);
-        return Err(AppError::Git(GitError::PassthroughFailed {
-            command: format!("git {}", cmd_desc),
-            status_code: status.code(),
-        }));
+    
+    tracing::debug!("执行 Git 命令: git {}", git_args.join(" "));
+    
+    let result = crate::git_module::passthrough_to_git_with_error_handling(&git_args, true);
+    
+    // 清理临时文件
+    if let Some(temp_file_path) = temp_file_path_opt {
+        cleanup_commit_message_file(&temp_file_path);
     }
+    
+    if let Err(e) = result {
+        tracing::error!("传递 git {} 失败", cmd_desc);
+        return Err(e);
+    }
+    
     tracing::info!(
         "传递 git {} 已成功启动/完成。",
         cmd_desc
@@ -165,9 +210,14 @@ pub async fn handle_commit_passthrough(
 /// 判断是否应该使用Tree-sitter分析
 fn should_use_tree_sitter(args: &CommitArgs, config: &AppConfig) -> bool {
     // 优先使用命令行参数
-    if args.tree_sitter.is_some() {
-        tracing::info!("通过命令行参数启用Tree-sitter分析");
-        return true;
+    if let Some(level) = &args.tree_sitter {
+        if !level.is_empty() {
+            tracing::info!("通过命令行参数启用Tree-sitter分析，级别: {}", level);
+            return true;
+        } else {
+            tracing::info!("命令行参数 --tree-sitter 值为空，不启用分析");
+            return false;
+        }
     }
 
     // 否则使用配置文件中的设置
@@ -176,6 +226,7 @@ fn should_use_tree_sitter(args: &CommitArgs, config: &AppConfig) -> bool {
         return true;
     }
 
+    tracing::debug!("未启用Tree-sitter分析");
     false
 }
 
@@ -225,7 +276,7 @@ async fn generate_enhanced_prompt_with_tree_sitter(
     };
 
     // 尝试获取项目根目录
-    if let Ok(output) = StdCommand::new("git")
+    if let Ok(output) = Command::new("git")
         .args(&["rev-parse", "--show-toplevel"])
         .output() 
     {
@@ -278,7 +329,7 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
         // Handle auto-staging functionality
         if args.auto_stage {
             tracing::info!("由于使用了 -a/--all 标志，正在自动暂存已跟踪的更改");
-            let add_result = StdCommand::new("git")
+            let add_result = Command::new("git")
                 .arg("add")
                 .arg("-u")
                 .output()
@@ -290,7 +341,7 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
             }
         }
 
-        let diff_out = StdCommand::new("git")
+        let diff_out = Command::new("git")
             .arg("diff")
             .arg("--staged")
             .output()
@@ -395,9 +446,12 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
         }
         tracing::info!("AI 消息:\n---\n{}\n---", final_msg);
 
-        let mut cmd_builder = StdCommand::new("git");
-        cmd_builder.arg("commit").arg("-m").arg(&final_msg);
-
+        // 创建提交消息临时文件
+        let temp_file_path = create_commit_message_file(&final_msg)?;
+        
+        // 使用 -F 从文件读取提交消息
+        let mut git_args = vec!["commit".to_string(), "-F".to_string(), temp_file_path.to_string_lossy().to_string()];
+        
         // Filter out -a, --all from passthrough_args if auto_stage=true, and tree-sitter flags with their values
         for (i, p_arg) in args.passthrough_args.iter().enumerate() {
             // 判断是否是特定标志
@@ -422,36 +476,39 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
                 // 移除 'a' 和 't'
                 if let Some(filtered_arg) = create_filtered_short_option(p_arg, &['a', 't']) {
                     if filtered_arg != "-" {
-                        cmd_builder.arg(filtered_arg);
+                        git_args.push(filtered_arg.to_string());
                     }
                 }
             } else if args.auto_stage && contains_auto_stage {
                 // 如果启用了auto-stage，移除 'a'
                 if let Some(filtered_arg) = create_filtered_short_option(p_arg, &['a']) {
                     if filtered_arg != "-" {
-                        cmd_builder.arg(filtered_arg);
+                        git_args.push(filtered_arg.to_string());
                     }
                 }
             } else if contains_ts {
                 // 如果包含tree-sitter选项，移除 't'
                 if let Some(filtered_arg) = create_filtered_short_option(p_arg, &['t']) {
                     if filtered_arg != "-" {
-                        cmd_builder.arg(filtered_arg);
+                        git_args.push(filtered_arg.to_string());
                     }
                 }
             } else {
                 // 没有特殊处理的情况，直接添加
-                cmd_builder.arg(p_arg);
+                git_args.push(p_arg.clone());
             }
         }
 
-        let commit_out = cmd_builder
-            .output()
-            .map_err(|e| AppError::IO("AI commit failed".into(), e))?;
-        if !commit_out.status.success() {
+        // 使用 git_module 中的函数执行 git commit
+        tracing::debug!("执行 Git 命令: git {}", git_args.join(" "));
+        
+        let result = crate::git_module::passthrough_to_git_with_error_handling(&git_args, true);
+        if let Err(e) = result {
             tracing::error!("带有 AI 消息的 Git commit 命令失败。");
-            return Err(map_output_to_git_command_error("git commit -m <AI>", commit_out).into());
+            return Err(e);
         }
+        // 清理临时文件
+        cleanup_commit_message_file(&temp_file_path);
         tracing::info!("使用 AI 消息成功提交。");
     } else {
         return handle_commit_passthrough(args, "(standard commit with --noai)".to_string()).await;

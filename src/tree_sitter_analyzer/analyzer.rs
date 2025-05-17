@@ -191,18 +191,18 @@ impl TreeSitterAnalyzer {
         Ok(())
     }
 
-    pub fn detect_language(&self, path: &Path) -> Result<String, TreeSitterError> {
+    pub fn detect_language(&self, path: &Path) -> Result<Option<String>, TreeSitterError> {
         let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
         match extension {
-            "rs" => Ok("rust".to_string()),
-            "java" => Ok("java".to_string()),
-            "py" => Ok("python".to_string()),
-            "go" => Ok("go".to_string()),
-            "js" | "ts" | "jsx" | "tsx" => Ok("javascript".to_string()), // Group JS/TS
-            _ => Err(TreeSitterError::UnsupportedLanguage(format!(
-                "Unsupported file extension: {}",
-                extension
-            ))),
+            "rs" => Ok(Some("rust".to_string())),
+            "java" => Ok(Some("java".to_string())),
+            "py" => Ok(Some("python".to_string())),
+            "go" => Ok(Some("go".to_string())),
+            "js" | "ts" | "jsx" | "tsx" => Ok(Some("javascript".to_string())), // Group JS/TS
+            // 明确标识为非代码文件，不需要 tree-sitter 分析
+            "md" | "markdown" | "txt" | "json" | "yml" | "yaml" | "toml" | "xml" | "html" | "css" | "svg" | "png" | "jpg" | "jpeg" | "gif" | "ico" => Ok(None),
+            // 对于未知扩展名，返回 None 而不是错误，避免错误日志过多
+            _ => Ok(None),
         }
     }
     
@@ -227,7 +227,10 @@ impl TreeSitterAnalyzer {
 
 
     pub fn parse_file(&mut self, file_path: &Path) -> Result<FileAst, TreeSitterError> {
-        let lang_id = self.detect_language(file_path)?;
+        let lang_id_opt = self.detect_language(file_path)?;
+        let lang_id = lang_id_opt.ok_or_else(|| {
+            TreeSitterError::UnsupportedLanguage(format!("Non-code file: {:?}", file_path))
+        })?;
         let language = self.languages.get(&lang_id).ok_or_else(|| {
             TreeSitterError::UnsupportedLanguage(format!("Language '{}' not initialized.", lang_id))
         })?;
@@ -336,36 +339,64 @@ impl TreeSitterAnalyzer {
                         continue;
                     }
 
-                    match self.parse_file(&file_path) {
-                        Ok(file_ast) => {
-                            // Analyze changes within this file based on hunks
-                            let affected_nodes = self.analyze_file_changes(&file_ast, &file_diff_info.hunks)?;
-                            
-                            // Generate a summary for this file (placeholder)
-                            let summary = format!("File {:?} was {:?}. Affected nodes: {}", 
-                                                  file_ast.path, file_diff_info.change_type, affected_nodes.len());
+                    // 首先检查文件类型是否支持 tree-sitter 分析
+                    match self.detect_language(&file_path) {
+                        Ok(Some(lang_id)) => {
+                            // 支持的编程语言，继续 tree-sitter 分析
+                            match self.parse_file(&file_path) {
+                                Ok(file_ast) => {
+                                    // Analyze changes within this file based on hunks
+                                    let affected_nodes = self.analyze_file_changes(&file_ast, &file_diff_info.hunks)?;
+                                    
+                                    // Generate a summary for this file (placeholder)
+                                    let summary = format!("File {:?} was {:?}. Affected nodes: {}", 
+                                                        file_ast.path, file_diff_info.change_type, affected_nodes.len());
 
-                            file_analyses.push(FileAnalysis {
-                                path: file_ast.path.clone(),
-                                language: file_ast.language_id.clone(),
-                                change_type: file_diff_info.change_type.clone(),
-                                affected_nodes,
-                                summary: Some(summary),
-                            });
-                        }
-                        Err(e) => {
-                            error!("Failed to parse file {:?}: {:?}", file_path, e);
-                            // Add a FileAnalysis entry indicating error
+                                    file_analyses.push(FileAnalysis {
+                                        path: file_ast.path.clone(),
+                                        language: file_ast.language_id.clone(),
+                                        change_type: file_diff_info.change_type.clone(),
+                                        affected_nodes,
+                                        summary: Some(summary),
+                                    });
+                                },
+                                Err(e) => {
+                                    error!("Failed to parse file {:?}: {:?}", file_path, e);
+                                    file_analyses.push(FileAnalysis {
+                                        path: file_path.clone(),
+                                        language: lang_id,
+                                        change_type: file_diff_info.change_type.clone(),
+                                        affected_nodes: Vec::new(),
+                                        summary: Some(format!("Error parsing file: {:?}", e)),
+                                    });
+                                }
+                            }
+                        },
+                        Ok(None) => {
+                            // 不支持 tree-sitter 分析的文件类型（如文档、配置文件等）
+                            debug!("Skipping tree-sitter analysis for non-code file: {:?}", file_path);
                             file_analyses.push(FileAnalysis {
                                 path: file_path.clone(),
-                                language: self.detect_language(&file_path).unwrap_or_default(),
+                                language: "text".to_string(),
                                 change_type: file_diff_info.change_type.clone(),
                                 affected_nodes: Vec::new(),
-                                summary: Some(format!("Error parsing file: {:?}", e)),
+                                summary: Some(format!("File {:?} was {:?} (non-code file).", file_path, file_diff_info.change_type)),
+                            });
+                        },
+                        Err(e) => {
+                            // 未知扩展名或其他错误
+                            warn!("Unknown file type in diff, skipping analysis: {:?} - {:?}", file_path, e);
+                            file_analyses.push(FileAnalysis {
+                                path: file_path.clone(),
+                                language: "unknown".to_string(),
+                                change_type: file_diff_info.change_type.clone(),
+                                affected_nodes: Vec::new(),
+                                summary: Some(format!("Unknown file type: {:?}", file_path)),
                             });
                         }
                     }
                 }
+                // 处理已删除或重命名的文件
                 ChangeType::Deleted | ChangeType::Renamed => {
                      // For deleted/renamed files, we might not parse the new content (if deleted)
                      // or we'd parse the new path if renamed.
@@ -377,7 +408,11 @@ impl TreeSitterAnalyzer {
                     };
                     file_analyses.push(FileAnalysis {
                         path: path_to_log.clone(),
-                        language: self.detect_language(path_to_log).unwrap_or_default(),
+                        language: match self.detect_language(path_to_log) {
+                            Ok(Some(lang)) => lang,
+                            Ok(None) => "text".to_string(),
+                            Err(_) => "unknown".to_string(),
+                        },
                         change_type: file_diff_info.change_type.clone(),
                         affected_nodes: Vec::new(), // No AST to analyze for purely deleted
                         summary: Some(format!("File {:?} was {:?}.", path_to_log, file_diff_info.change_type)),
@@ -501,8 +536,9 @@ impl TreeSitterAnalyzer {
     pub fn analyze_java_project_structure(&mut self, file_paths: &[PathBuf]) -> Result<JavaProjectStructure, TreeSitterError> {
         let mut project_structure = JavaProjectStructure::new();
         for file_path in file_paths {
-            if self.detect_language(file_path)? != "java" {
-                continue;
+            match self.detect_language(file_path)? {
+                Some(lang) if lang == "java" => {},
+                _ => continue, // Skip non-Java files
             }
             let ast = self.parse_file(file_path)?;
             

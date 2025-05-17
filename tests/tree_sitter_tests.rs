@@ -24,17 +24,21 @@ mod tree_sitter_integration_tests {
         let analyzer = TreeSitterAnalyzer::new(config).unwrap();
         
         // Test common languages
-        assert_eq!(analyzer.detect_language(&PathBuf::from("file.rs")).unwrap(), "rust");
-        assert_eq!(analyzer.detect_language(&PathBuf::from("script.js")).unwrap(), "javascript");
-        assert_eq!(analyzer.detect_language(&PathBuf::from("module.py")).unwrap(), "python");
-        assert_eq!(analyzer.detect_language(&PathBuf::from("Main.java")).unwrap(), "java");
+        assert_eq!(analyzer.detect_language(&PathBuf::from("file.rs")).unwrap(), Some("rust".to_string()));
+        assert_eq!(analyzer.detect_language(&PathBuf::from("script.js")).unwrap(), Some("javascript".to_string()));
+        assert_eq!(analyzer.detect_language(&PathBuf::from("module.py")).unwrap(), Some("python".to_string()));
+        assert_eq!(analyzer.detect_language(&PathBuf::from("Main.java")).unwrap(), Some("java".to_string()));
         
         // Test TypeScript extension (should be detected as JavaScript)
-        assert_eq!(analyzer.detect_language(&PathBuf::from("component.tsx")).unwrap(), "javascript");
+        assert_eq!(analyzer.detect_language(&PathBuf::from("component.tsx")).unwrap(), Some("javascript".to_string()));
+        
+        // Test non-code files
+        let result = analyzer.detect_language(&PathBuf::from("readme.md")).unwrap();
+        assert_eq!(result, None, "Should return None for markdown files");
         
         // Test unsupported language
-        let result = analyzer.detect_language(&PathBuf::from("unknown.xyz"));
-        assert!(result.is_err(), "Should return error for unsupported language");
+        let result = analyzer.detect_language(&PathBuf::from("unknown.xyz")).unwrap();
+        assert_eq!(result, None, "Should return None for unsupported language");
     }
     
     #[test]
