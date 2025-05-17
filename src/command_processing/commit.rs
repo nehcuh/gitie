@@ -360,6 +360,7 @@ pub async fn handle_commit(args: CommitArgs, config: &AppConfig) -> Result<(), A
                     auto_stage: args.auto_stage,
                     tree_sitter: None,
                     message: None,
+                    review: false,
                     passthrough_args: args.passthrough_args.clone(),
                 };
                 return handle_commit_passthrough(

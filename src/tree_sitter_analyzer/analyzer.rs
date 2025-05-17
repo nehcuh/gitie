@@ -11,7 +11,8 @@ use crate::core::errors::TreeSitterError; // Updated path
 use super::core::{ // Assuming core.rs will export these
     FileAst, DiffHunk, ChangeType, 
     FileAnalysis, DiffAnalysis, AffectedNode,
-    ChangeAnalysis,
+    ChangeAnalysis, GitDiff, HunkRange, ChangedFile,
+    LineRange,
     get_tree_sitter_rust, get_tree_sitter_java, 
     get_tree_sitter_python, get_tree_sitter_go,
     JavaProjectStructure, // Now imported from core instead of java
@@ -56,6 +57,155 @@ impl TreeSitterAnalyzer {
         self.project_root = root;
         // Potentially clear or update caches if project root changes
         self.file_asts.clear(); 
+    }
+    
+    /// Create a simple GitDiff from diff text
+    ///
+    /// This is a simplified version that doesn't attempt advanced parsing
+    /// but guarantees the correct return type structure
+    pub fn create_simple_git_diff(&self, diff_text: &str) -> GitDiff {
+        // Use the parse_utils parser for more robust diff parsing
+        match crate::tree_sitter_analyzer::parse_utils::parse_git_diff_text(diff_text) {
+            Ok(git_diff) => git_diff,
+            Err(_) => {
+                // Fallback to the simplest parser if the new one fails
+                crate::tree_sitter_analyzer::simple_diff::parse_simple_diff(diff_text)
+            }
+        }
+    }
+    
+    /// Parse Git diff text into a structured GitDiff
+    /// 
+    /// This function takes a Git diff text output and parses it into
+    /// a structured GitDiff object for further analysis.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `diff_text` - The Git diff text output from git diff command
+    /// 
+    /// # Returns
+    /// 
+    /// * `Result<GitDiff, TreeSitterError>` - The parsed GitDiff or an error
+    pub fn parse_git_diff_text(&self, diff_text: &str) -> Result<GitDiff, TreeSitterError> {
+        let mut git_diff = GitDiff {
+            changed_files: Vec::new(),
+            metadata: None,
+        };
+        
+        if diff_text.trim().is_empty() {
+            return Ok(git_diff);
+        }
+        
+        let mut current_file: Option<ChangedFile> = None;
+        let mut current_hunk: Option<DiffHunk> = None;
+        
+        for line in diff_text.lines() {
+            // Process diff header lines
+            if line.starts_with("diff --git ") {
+                // Save previous file if exists
+                if let Some(file) = current_file.take() {
+                    git_diff.changed_files.push(file);
+                }
+                
+                // Start new file
+                current_file = Some(ChangedFile {
+                    path: PathBuf::new(),
+                    change_type: ChangeType::Modified,
+                    hunks: Vec::new(),
+                    file_mode_change: None,
+                });
+            }
+            // Process file path lines
+            else if line.starts_with("--- ") || line.starts_with("+++ ") {
+                if let Some(ref mut file) = current_file {
+                    if line.starts_with("+++ b/") && line.len() > 6 {
+                        file.path = PathBuf::from(&line[6..]);
+                    }
+                }
+            }
+            // Process file mode changes
+            else if line.starts_with("new file mode ") {
+                if let Some(ref mut file) = current_file {
+                    file.change_type = ChangeType::Added;
+                }
+            }
+            else if line.starts_with("deleted file mode ") {
+                if let Some(ref mut file) = current_file {
+                    file.change_type = ChangeType::Deleted;
+                }
+            }
+            // Process hunk header
+            else if line.starts_with("@@ ") {
+                // Save previous hunk if exists
+                if let Some(hunk) = current_hunk.take() {
+                    if let Some(ref mut file) = current_file {
+                        file.hunks.push(hunk);
+                    }
+                }
+                
+                // Parse hunk header: @@ -start,count +start,count @@
+                let end_pos = line.find(" @@");
+                if let Some(pos) = end_pos {
+                    let header = &line[3..pos];
+                    let parts: Vec<&str> = header.split(' ').collect();
+                    
+                    if parts.len() >= 2 {
+                        let old_range_str = parts[0].trim_start_matches('-');
+                        let new_range_str = parts[1].trim_start_matches('+');
+                        
+                        let old_range = Self::parse_hunk_range(old_range_str);
+                        let new_range = Self::parse_hunk_range(new_range_str);
+                        
+                        current_hunk = Some(DiffHunk {
+                            old_range,
+                            new_range,
+                            lines: Vec::new(),
+                        });
+                    }
+                }
+            }
+            // Process hunk content
+            else if line.starts_with('+') || line.starts_with('-') || line.starts_with(' ') {
+                if let Some(ref mut hunk) = current_hunk {
+                    hunk.lines.push(line.to_string());
+                }
+            }
+        }
+        
+        // Add final hunk and file
+        if let Some(hunk) = current_hunk.take() {
+            if let Some(ref mut file) = current_file {
+                file.hunks.push(hunk);
+            }
+        }
+        
+        if let Some(file) = current_file.take() {
+            git_diff.changed_files.push(file);
+        }
+        
+        Ok(git_diff)
+    }
+    
+    /// Parse hunk range string like "1,5" into a HunkRange
+    fn parse_hunk_range(range_str: &str) -> HunkRange {
+        let parts: Vec<&str> = range_str.split(',').collect();
+        
+        let start = parts.get(0)
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
+            
+        let count = if parts.len() > 1 {
+            parts.get(1)
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(0)
+        } else {
+            1 // Default count is 1 if not specified
+        };
+        
+        HunkRange {
+            start,
+            count,
+        }
     }
 
     fn initialize_languages(&mut self) -> Result<(), TreeSitterError> {
@@ -401,11 +551,7 @@ impl TreeSitterAnalyzer {
                      // For deleted/renamed files, we might not parse the new content (if deleted)
                      // or we'd parse the new path if renamed.
                      // The FileDiff struct should ideally hold old_path and new_path for renames.
-                    let path_to_log = if file_diff_info.change_type == ChangeType::Deleted {
-                        file_diff_info.old_path.as_ref().unwrap_or(&file_diff_info.path)
-                    } else {
-                        &file_diff_info.path // new path for renames
-                    };
+                    let path_to_log = &file_diff_info.path; // Use the available path field
                     file_analyses.push(FileAnalysis {
                         path: path_to_log.clone(),
                         language: match self.detect_language(path_to_log) {
@@ -422,8 +568,10 @@ impl TreeSitterAnalyzer {
             }
         }
         
-        // Generate an overall summary (placeholder)
-        let overall_summary = super::core::generate_overall_summary(&git_diff); // Use the one from core
+        // Generate a simple overall summary
+        let overall_summary = format!("Analyzed {} files with {} total changes", 
+            git_diff.changed_files.len(),
+            git_diff.changed_files.iter().map(|f| f.hunks.len()).sum::<usize>());
 
         Ok(DiffAnalysis {
             file_analyses,

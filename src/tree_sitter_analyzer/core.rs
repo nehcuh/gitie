@@ -96,17 +96,25 @@ impl LineRange {
     }
 }
 
+// Represents a hunk range in git diff format (@@ -a,b +c,d @@)
+#[derive(Debug, Clone)]
+pub struct HunkRange {
+    pub start: usize,
+    pub count: usize,
+}
+
 // Represents a single hunk in a Git diff
 #[derive(Debug, Clone)]
 pub struct DiffHunk {
     #[allow(dead_code)]
-    pub old_range: LineRange,
-    pub new_range: LineRange,
+    pub old_range: HunkRange,
+    pub new_range: HunkRange,
     #[allow(dead_code)]
     pub lines: Vec<String>,
 }
 
-// Represents a changed file in a Git diff
+// Legacy structure, keeping this for backward compatibility,
+// but we're migrating to ChangedFile
 #[derive(Debug, Clone)]
 pub struct FileDiff {
     pub path: PathBuf,
@@ -115,10 +123,74 @@ pub struct FileDiff {
     pub hunks: Vec<DiffHunk>,
 }
 
+// Conversion functions between FileDiff and ChangedFile
+impl From<FileDiff> for ChangedFile {
+    fn from(file_diff: FileDiff) -> Self {
+        ChangedFile {
+            path: file_diff.path,
+            change_type: file_diff.change_type,
+            hunks: file_diff.hunks,
+            file_mode_change: None,
+        }
+    }
+}
+
+impl From<ChangedFile> for FileDiff {
+    fn from(changed_file: ChangedFile) -> Self {
+        FileDiff {
+            path: changed_file.path,
+            old_path: None,
+            change_type: changed_file.change_type,
+            hunks: changed_file.hunks,
+        }
+    }
+}
+
+// Represents a changed file in a Git diff
+#[derive(Debug, Clone)]
+pub struct ChangedFile {
+    pub path: PathBuf,
+    pub change_type: ChangeType,
+    pub hunks: Vec<DiffHunk>,
+    pub file_mode_change: Option<String>,
+}
+
 // Represents the entire Git diff
 #[derive(Debug, Clone)]
 pub struct GitDiff {
-    pub changed_files: Vec<FileDiff>,
+    pub changed_files: Vec<ChangedFile>,
+    pub metadata: Option<HashMap<String, String>>,
+}
+
+// These conversion functions are no longer needed
+// since we're directly creating ChangedFile objects
+
+impl GitDiff {
+    /// Counts the total number of lines in the diff
+    pub fn total_lines(&self) -> usize {
+        let mut count = 0;
+        for file in &self.changed_files {
+            for hunk in &file.hunks {
+                count += hunk.lines.len();
+            }
+        }
+        count
+    }
+    
+    /// Counts the number of changed lines
+    pub fn changed_lines(&self) -> usize {
+        let mut count = 0;
+        for file in &self.changed_files {
+            for hunk in &file.hunks {
+                for line in &hunk.lines {
+                    if line.starts_with('+') || line.starts_with('-') {
+                        count += 1;
+                    }
+                }
+            }
+        }
+        count
+    }
 }
 
 // Represents a node in the AST affected by changes
@@ -257,6 +329,15 @@ impl Default for ChangeScope {
     }
 }
 
+// Parse git diff output into a GitDiff structure
+pub fn parse_git_diff(diff_text: &str) -> Result<GitDiff, TreeSitterError> {
+    // Delegate to the newer parser implementation
+    match crate::tree_sitter_analyzer::parse_utils::parse_git_diff_text(diff_text) {
+        Ok(git_diff) => Ok(git_diff),
+        Err(e) => Err(TreeSitterError::ParseError(format!("Failed to parse diff: {}", e)))
+    }
+}
+
 // Types of relationships between Java classes
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JavaRelationType {
@@ -359,21 +440,21 @@ impl JavaPackage {
             classes: HashMap::new(),
         }
     }
-    
+
     #[allow(dead_code)]
     pub fn add_class(&mut self, class_name: String, path: &Path) {
-        self.classes.entry(class_name.clone())
-            .or_insert_with(|| JavaClass::new(class_name, path.to_path_buf()));
+        let class = JavaClass::new(class_name.clone(), path.to_path_buf());
+        self.classes.insert(class_name, class);
     }
-    
+
     #[allow(dead_code)]
     pub fn get_classes(&self) -> Vec<&JavaClass> {
         self.classes.values().collect()
     }
 }
 
-// Java project structure (packages and classes)
-#[derive(Debug, Clone, Default)]
+// Project-wide Java structure
+#[derive(Debug, Clone)]
 pub struct JavaProjectStructure {
     #[allow(dead_code)]
     pub packages: HashMap<String, JavaPackage>,
@@ -382,7 +463,9 @@ pub struct JavaProjectStructure {
 impl JavaProjectStructure {
     #[allow(dead_code)]
     pub fn new() -> Self {
-        Self { packages: HashMap::new() }
+        Self {
+            packages: HashMap::new(),
+        }
     }
 
     #[allow(dead_code)]
@@ -443,8 +526,8 @@ impl JavaProjectStructure {
     }
 
     #[allow(dead_code)]
-    pub fn get_package(&self, package_name: &str) -> Option<&JavaPackage> {
-        self.packages.get(package_name)
+    pub fn get_package(&self, name: &str) -> Option<&JavaPackage> {
+        self.packages.get(name)
     }
 }
 
@@ -458,183 +541,79 @@ pub fn calculate_hash(content: &str) -> String {
     format!("{:x}", hash)
 }
 
-// Parse git diff output
-pub fn parse_git_diff(diff_text: &str) -> Result<GitDiff, TreeSitterError> {
-    let mut changed_files = Vec::new();
-    let mut current_file_diff: Option<FileDiff> = None;
-    let mut current_hunks: Vec<DiffHunk> = Vec::new();
-    let mut current_hunk_lines: Vec<String> = Vec::new();
-    let mut current_hunk_header: Option<String> = None;
-    let mut old_range: Option<LineRange> = None;
-    let mut new_range: Option<LineRange> = None;
-
-    for line in diff_text.lines() {
-        if line.starts_with("diff --git") {
-            if let Some(mut file_diff) = current_file_diff.take() {
-                if let Some(_h_header) = current_hunk_header.take() {
-                     if let (Some(or), Some(nr)) = (old_range.take(), new_range.take()) {
-                        current_hunks.push(DiffHunk {
-                            old_range: or,
-                            new_range: nr,
-                            lines: std::mem::take(&mut current_hunk_lines),
-                        });
-                    }
-                }
-                file_diff.hunks = std::mem::take(&mut current_hunks);
-                changed_files.push(file_diff);
-            }
-
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 4 {
-                let old_file_name = parts[2][2..].to_string();
-                let new_file_name = parts[3][2..].to_string();
-                current_file_diff = Some(FileDiff {
-                    old_path: Some(PathBuf::from(old_file_name)),
-                    path: PathBuf::from(new_file_name),
-                    hunks: Vec::new(),
-                    change_type: ChangeType::Modified,
-                });
-            }
-        } else if line.starts_with("--- a/") {
-            if let Some(ref mut file_diff) = current_file_diff {
-                file_diff.old_path = Some(PathBuf::from(&line[6..]));
-            }
-        } else if line.starts_with("+++ b/") {
-            if let Some(ref mut file_diff) = current_file_diff {
-                file_diff.path = PathBuf::from(&line[6..]);
-            }
-        } else if line.starts_with("@@ ") {
-            if let Some(_) = current_hunk_header.take() {
-                if let (Some(or), Some(nr)) = (old_range.take(), new_range.take()) {
-                    current_hunks.push(DiffHunk {
-                        old_range: or,
-                        new_range: nr,
-                        lines: std::mem::take(&mut current_hunk_lines),
-                    });
-                }
-            }
-            current_hunk_header = Some(line.to_string());
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 {
-                 old_range = Some(parse_line_range(parts[1]));
-                 new_range = Some(parse_line_range(parts[2]));
-            }
-        } else if current_hunk_header.is_some() {
-            current_hunk_lines.push(line.to_string());
-        } else if line.starts_with("new file mode") {
-            if let Some(ref mut file) = current_file_diff {
-                file.change_type = ChangeType::Added;
-            }
-        } else if line.starts_with("deleted file mode") {
-            if let Some(ref mut file) = current_file_diff {
-                file.change_type = ChangeType::Deleted;
-                if let Some(old_path) = &file.old_path {
-                     file.path = old_path.clone();
-                }
-            }
-        } else if line.starts_with("rename from ") {
-             if let Some(ref mut file) = current_file_diff {
-                file.change_type = ChangeType::Renamed;
-                file.old_path = Some(PathBuf::from(&line[12..]));
-            }
-        } else if line.starts_with("rename to ") {
-            if let Some(ref mut file) = current_file_diff {
-                file.path = PathBuf::from(&line[10..]);
-            }
-        }
-    }
-
-    if let Some(mut file_diff) = current_file_diff.take() {
-        if let Some(_) = current_hunk_header.take() {
-            if let (Some(or), Some(nr)) = (old_range.take(), new_range.take()) {
-                current_hunks.push(DiffHunk {
-                    old_range: or,
-                    new_range: nr,
-                    lines: std::mem::take(&mut current_hunk_lines),
-                });
-            }
-        }
-        file_diff.hunks = std::mem::take(&mut current_hunks);
-        changed_files.push(file_diff);
-    }
-
-    Ok(GitDiff { changed_files })
-}
-
 fn parse_line_range(range_str: &str) -> LineRange {
     let cleaned_range_str = range_str.trim_start_matches(|c| c == '-' || c == '+');
     let parts: Vec<&str> = cleaned_range_str.split(',').collect();
-    let start = parts[0].parse::<u32>().unwrap_or(1);
-    let count = if parts.len() > 1 {
-        parts[1].parse::<u32>().unwrap_or(0)
+
+    if let Some(start_str) = parts.get(0) {
+        let start = start_str.parse::<u32>().unwrap_or(0);
+        let count = if let Some(count_str) = parts.get(1) {
+            count_str.parse::<u32>().unwrap_or(0)
+        } else {
+            1  // Default to 1 line if not specified
+        };
+        
+        LineRange { start, count }
     } else {
-        1
-    };
-    LineRange { start, count }
+        LineRange { start: 0, count: 0 }
+    }
 }
 
-// Generate an overall summary of changes based on a GitDiff
-pub fn generate_overall_summary(diff: &GitDiff) -> String {
-    let file_count = diff.changed_files.len();
+// Function to generate an overall summary from analysis
+pub fn generate_overall_summary(file_analyses: &[FileAnalysis]) -> String {
+    let mut summary = String::new();
     
-    let added_count = diff.changed_files.iter()
-        .filter(|f| f.change_type == ChangeType::Added)
-        .count();
-        
-    let modified_count = diff.changed_files.iter()
-        .filter(|f| f.change_type == ChangeType::Modified)
-        .count();
-        
-    let deleted_count = diff.changed_files.iter()
-        .filter(|f| f.change_type == ChangeType::Deleted)
-        .count();
-        
-    let renamed_count = diff.changed_files.iter()
-        .filter(|f| f.change_type == ChangeType::Renamed)
-        .count();
+    if file_analyses.is_empty() {
+        return "No files analyzed".to_string();
+    }
     
-    let java_files_count = diff.changed_files.iter()
-        .filter(|f| f.path.extension().map_or(false, |ext| ext == "java"))
-        .count();
-        
-    let rust_files_count = diff.changed_files.iter()
-        .filter(|f| f.path.extension().map_or(false, |ext| ext == "rs"))
-        .count();
+    let file_count = file_analyses.len();
+    let mut total_nodes = 0;
+    let mut function_count = 0;
+    let mut class_count = 0;
+    let mut languages = HashMap::new();
     
-    let python_files_count = diff.changed_files.iter()
-        .filter(|f| f.path.extension().map_or(false, |ext| ext == "py"))
-        .count();
+    for analysis in file_analyses {
+        total_nodes += analysis.affected_nodes.len();
         
-    let go_files_count = diff.changed_files.iter()
-        .filter(|f| f.path.extension().map_or(false, |ext| ext == "go"))
-        .count();
+        for node in &analysis.affected_nodes {
+            if node.node_type.contains("function") || node.node_type.contains("method") {
+                function_count += 1;
+            } else if node.node_type.contains("class") || node.node_type.contains("struct") || node.node_type.contains("interface") {
+                class_count += 1;
+            }
+        }
         
-    let js_files_count = diff.changed_files.iter()
-        .filter(|f| f.path.extension().map_or(false, |ext| ext == "js" || ext == "ts" || ext == "jsx" || ext == "tsx"))
-        .count();
-        
-    let mut summary = format!(
-        "本次变更涉及 {} 个文件：新增 {}，修改 {}，删除 {}，重命名 {}",
-        file_count, added_count, modified_count, deleted_count, renamed_count
-    );
+        let lang = &analysis.language;
+        *languages.entry(lang.clone()).or_insert(0) += 1;
+    }
     
-    let language_counts = [
-        (java_files_count, "Java"),
-        (rust_files_count, "Rust"),
-        (python_files_count, "Python"),
-        (go_files_count, "Go"),
-        (js_files_count, "JavaScript/TypeScript")
-    ];
+    summary.push_str(&format!("Analyzed {} files\n", file_count));
     
-    let language_stats: Vec<String> = language_counts.into_iter()
-        .filter(|(count, _)| *count > 0)
-        .map(|(count, lang)| format!("{} ({} 个文件)", lang, count))
-        .collect();
+    if !languages.is_empty() {
+        summary.push_str("Languages: ");
+        let langs: Vec<String> = languages.iter()
+            .map(|(lang, count)| format!("{} ({})", lang, count))
+            .collect();
+        summary.push_str(&langs.join(", "));
+        summary.push_str("\n");
+    }
     
-    if !language_stats.is_empty() {
-        summary.push_str(&format!("\n涉及语言：{}", language_stats.join(", ")));
+    summary.push_str(&format!("Found {} affected nodes\n", total_nodes));
+    
+    if function_count > 0 || class_count > 0 {
+        summary.push_str("Including: ");
+        if function_count > 0 {
+            summary.push_str(&format!("{} functions/methods", function_count));
+        }
+        if class_count > 0 {
+            if function_count > 0 {
+                summary.push_str(", ");
+            }
+            summary.push_str(&format!("{} classes/structs", class_count));
+        }
+        summary.push_str("\n");
     }
     
     summary
 }
-

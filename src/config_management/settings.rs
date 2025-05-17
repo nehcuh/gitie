@@ -52,13 +52,15 @@ pub struct TreeSitterConfig {
 impl Default for TreeSitterConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             analysis_depth: default_analysis_depth(),
             cache_enabled: default_cache_enabled(),
             languages: default_languages(),
         }
     }
 }
+
+// TreeSitterConfig is already clonable via #[derive(Clone)]
 
 fn default_analysis_depth() -> String {
     "medium".to_string()

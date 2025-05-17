@@ -28,7 +28,8 @@ fn parse_git_diff(diff_text: &str) -> Result<gitie::tree_sitter_analyzer::core::
     };
     
     Ok(gitie::tree_sitter_analyzer::core::GitDiff {
-        changed_files: vec![file_diff],
+        changed_files: vec![file_diff.into()],
+        metadata: None,
     })
 }
 

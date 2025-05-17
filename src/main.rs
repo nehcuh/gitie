@@ -4,11 +4,13 @@ mod command_processing;
 mod config_management;
 mod core;
 mod git_module;
+mod review_engine;
 mod tree_sitter_analyzer;
 
 use crate::ai_module::explainer::explain_git_error;
-use crate::cli_interface::args::{CommitArgs, GitieArgs, GitieSubCommand, args_contain_help, should_use_ai};
+use crate::cli_interface::args::{CommitArgs, GitieArgs, GitieSubCommand, ReviewArgs, args_contain_help, should_use_ai};
 use crate::command_processing::commit::handle_commit;
+use crate::command_processing::review::{handle_review, handle_commit_with_review};
 use crate::config_management::settings::AppConfig;
 use crate::core::errors::{AppError, GitError};
 use crate::git_module::{
@@ -154,6 +156,31 @@ async fn main() -> Result<(), AppError> {
     // 过滤掉tree-sitter相关的参数，确保干净的git命令
     let filtered_args = filter_tree_sitter_args(&args[1..]);
     
+    // 检查是否为 review 命令
+    if filtered_args.contains(&"review".to_string()) && filtered_args.iter().all(|a| a != "--help" && a != "-h") {
+        tracing::info!("检测到review命令");
+        
+        // 重构review命令参数以便使用clap解析
+        let mut review_args_vec = vec!["gitie".to_string()];
+        for arg in filtered_args.iter().filter(|a| *a != "review") {
+            review_args_vec.push(arg.clone());
+        }
+        
+        tracing::debug!("重构的review命令: {:?}", review_args_vec);
+        
+        if let Ok(parsed_args) = GitieArgs::try_parse_from(&review_args_vec) {
+            match parsed_args.command {
+                GitieSubCommand::Review(review_args) => {
+                    return handle_review(review_args, &config).await;
+                }
+                _ => {}
+            }
+        } else {
+            tracing::warn!("解析review命令失败");
+            // 如果解析失败，我们默认传递给git，让git报错
+        }
+    }
+    
     // 如果是commit命令，使用AI辅助生成提交信息
     if filtered_args.contains(&"commit".to_string()) && filtered_args.iter().all(|a| a != "--help" && a != "-h") {
         tracing::info!("检测到commit命令");
@@ -169,8 +196,17 @@ async fn main() -> Result<(), AppError> {
         if let Ok(parsed_args) = GitieArgs::try_parse_from(&commit_args_vec) {
             match parsed_args.command {
                 GitieSubCommand::Commit(commit_args) => {
+                    // 检查是否需要进行提交前代码评审
+                    if commit_args.review {
+                        if let Ok(should_cancel) = handle_commit_with_review(&commit_args, &config).await {
+                            if should_cancel {
+                                return Ok(());
+                            }
+                        }
+                    }
                     return handle_commit(commit_args, &config).await;
                 }
+                _ => {}
             }
         } else {
             tracing::warn!("解析commit命令失败，将创建默认commit命令");
@@ -193,8 +229,19 @@ async fn main() -> Result<(), AppError> {
                 auto_stage: filtered_args.contains(&"--all".to_string()) 
                     || filtered_args.contains(&"-a".to_string()),
                 message: None,
+                review: filtered_args.contains(&"--review".to_string()),
                 passthrough_args,
             };
+            
+            // 检查是否需要进行提交前代码评审
+            if default_commit_args.review {
+                if let Ok(should_cancel) = handle_commit_with_review(&default_commit_args, &config).await {
+                    if should_cancel {
+                        return Ok(());
+                    }
+                }
+            }
+            
             return handle_commit(default_commit_args, &config).await;
         }
     }

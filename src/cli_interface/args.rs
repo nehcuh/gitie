@@ -15,6 +15,9 @@ pub enum GitieSubCommand {
     /// Handle git command operation, potentially with AI assistance for message generation.
     #[clap(alias = "cm")]
     Commit(CommitArgs),
+    /// Perform code review with AI assistance.
+    #[clap(alias = "rv")]
+    Review(ReviewArgs),
     // Future: Add(AddArgs)
     // Future: Config(ConfigArgs)
 }
@@ -44,9 +47,61 @@ pub struct CommitArgs {
     #[clap(short, long)]
     pub message: Option<String>,
 
+    /// Perform code review before commit
+    #[clap(long = "review")]
+    pub review: bool,
+
     /// Allow all other flags and arguments to be passed through to the udnerlying `git commit`.
     #[clap(allow_hyphen_values = true, last = true)]
     pub passthrough_args: Vec<String>,
+}
+
+/// Arguments for the `review` subcommand
+#[derive(Parser, Debug, Clone)]
+pub struct ReviewArgs {
+    /// Analysis depth level
+    #[clap(long, value_name = "LEVEL", default_value = "normal")]
+    pub depth: String,
+
+    /// Focus areas for the review
+    #[clap(long, value_name = "AREA")]
+    pub focus: Option<String>,
+
+    /// Limit analysis to specific language
+    #[clap(long, value_name = "LANGUAGE")]
+    pub lang: Option<String>,
+
+    /// Output format
+    #[clap(long, value_name = "FORMAT", default_value = "text")]
+    pub format: String,
+
+    /// Output file
+    #[clap(long, value_name = "FILE")]
+    pub output: Option<String>,
+
+    /// Use Tree-sitter for enhanced code analysis (enabled by default)
+    #[clap(long = "ts")]
+    pub tree_sitter: bool,
+
+    /// Disable Tree-sitter analysis
+    #[clap(long = "no-ts")]
+    pub no_tree_sitter: bool,
+
+    /// Combined review with tree-sitter analysis
+    #[clap(long = "review-ts")]
+    pub review_ts: bool,
+
+    /// Allow all other flags and arguments to be passed through to git.
+    #[clap(allow_hyphen_values = true, last = true)]
+    pub passthrough_args: Vec<String>,
+
+    /// First commit reference
+    #[clap(index = 1)]
+    pub commit1: Option<String>,
+
+    /// Second commit reference (if comparing two commits)
+    #[clap(index = 2)]
+    pub commit2: Option<String>,
 }
 
 /// Checks if a slice of string arguments contains "-h" or "--help".

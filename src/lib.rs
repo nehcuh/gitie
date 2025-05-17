@@ -7,6 +7,7 @@ pub mod command_processing;
 pub mod config_management;
 pub mod core;
 pub mod git_module;
+pub mod review_engine;
 pub mod tree_sitter_analyzer;
 
 // For tests that might have been using the old paths,
