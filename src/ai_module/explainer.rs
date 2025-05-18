@@ -93,6 +93,7 @@ async fn execute_ai_request(
 }
 
 /// Takes the raw output from a Git command (typically its help text)
+/// This function can handle both standard git help output and gitie-enhanced help.
 #[allow(dead_code)]
 pub async fn explain_git_command_output(
     config: &AppConfig,
@@ -111,7 +112,12 @@ pub async fn explain_git_command_output(
         command_output.chars().take(200).collect::<String>()
     );
 
-    let system_prompt_content = config
+    // Determine if this contains gitie custom help
+    let contains_gitie_help = command_output.contains("gitie: Git with AI assistance") || 
+                             command_output.contains("Gitie 特有命令");
+
+    // Enhance system prompt to handle gitie-specific commands
+    let mut system_prompt_content = config
         .prompts
         .get("explanation")
         .cloned()
@@ -119,24 +125,47 @@ pub async fn explain_git_command_output(
             tracing::warn!("在配置中未找到 Git AI helper 提示词，使用空字符串");
             "".to_string()
         });
+    
+    // Add gitie-specific instructions if needed
+    if contains_gitie_help {
+        system_prompt_content = format!(
+            "{}\n\n此帮助内容包含标准 Git 命令和 Gitie 特有命令。请分别解释这两部分：\n\
+            1. Gitie 特有命令：详细解释这些 AI 增强的命令如何工作以及它们的参数\n\
+            2. 标准 Git 命令：提供简洁明了的解释\n\
+            始终关注帮助用户理解如何使用 Gitie 的 AI 功能来提高生产力", 
+            system_prompt_content
+        );
+    }
 
     let messages = vec![
         ChatMessage {
             role: "system".to_string(),
-            content: system_prompt_content, // Use the prompt from config
+            content: system_prompt_content,
         },
         ChatMessage {
             role: "user".to_string(),
-            content: command_output.to_string(), // Send the full output
+            content: format!(
+                "请解释以下{}帮助信息，重点说明每个命令的作用和用法：\n\n{}",
+                if contains_gitie_help { "Gitie 和 Git " } else { "Git " },
+                command_output
+            ),
         },
     ];
 
     match execute_ai_request(config, messages).await {
         Ok(ai_explanation) => {
-            let formatted_output = format!(
-                "## Original Output\n\n```text\n{}\n```\n\n## AI Explanation\n\n{}",
-                command_output, ai_explanation
-            );
+            // 针对 gitie 帮助使用更清晰的格式
+            let formatted_output = if contains_gitie_help {
+                format!(
+                    "# Gitie 命令帮助\n\n## AI 解释\n\n{}\n\n## 原始帮助输出\n\n```text\n{}\n```",
+                    ai_explanation, command_output
+                )
+            } else {
+                format!(
+                    "# Git 命令帮助\n\n## AI 解释\n\n{}\n\n## 原始帮助输出\n\n```text\n{}\n```",
+                    ai_explanation, command_output
+                )
+            };
             Ok(formatted_output)
         }
         Err(e) => Err(e),

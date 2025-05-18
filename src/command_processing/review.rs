@@ -10,6 +10,7 @@ use std::path::Path;
 use std::fs;
 use std::io::Write;
 use colored::Colorize;
+use std::env;
 
 /// Extract diff information for review
 ///
@@ -146,6 +147,25 @@ fn get_language_from_file_path(path: &str) -> Option<String> {
     detect_language_from_path(&path_buf)
 }
 
+/// 展开路径中的波浪号(~)为用户主目录
+fn expand_tilde(path: &str) -> String {
+    if path.starts_with("~/") || path == "~" {
+        if let Ok(home) = env::var("HOME") {
+            return path.replacen("~", &home, 1);
+        }
+        
+        // 尝试通过其他方式获取主目录
+        if let Some(home_dir) = dirs_next::home_dir() {
+            if let Some(home_str) = home_dir.to_str() {
+                return path.replacen("~", home_str, 1);
+            }
+        }
+    }
+    
+    // 如果无法展开或路径不包含波浪号，返回原始路径
+    path.to_string()
+}
+
 /// Format and save or display review results
 async fn format_and_output_review(
     review_text: &str, 
@@ -183,13 +203,17 @@ async fn format_and_output_review(
     
     // Output to file or stdout
     if let Some(output_file) = &args.output {
-        let mut file = fs::File::create(output_file)
-            .map_err(|e| AppError::IO(format!("无法创建输出文件: {}", output_file), e))?;
+        // 展开波浪号为用户主目录
+        let expanded_path = expand_tilde(output_file);
+        tracing::debug!("输出路径从 {} 展开为 {}", output_file, expanded_path);
+        
+        let mut file = fs::File::create(&expanded_path)
+            .map_err(|e| AppError::IO(format!("无法创建输出文件: {}", expanded_path), e))?;
             
         file.write_all(formatted_output.as_bytes())
-            .map_err(|e| AppError::IO(format!("写入输出文件时发生错误: {}", output_file), e))?;
+            .map_err(|e| AppError::IO(format!("写入输出文件时发生错误: {}", expanded_path), e))?;
             
-        println!("评审结果已保存到: {}", output_file);
+        println!("评审结果已保存到: {}", expanded_path);
     } else {
         // Print to console with some formatting
         println!("{}", "代码评审结果".bold().green());

@@ -7,8 +7,8 @@ mod git_module;
 mod review_engine;
 mod tree_sitter_analyzer;
 
-use crate::ai_module::explainer::explain_git_error;
-use crate::cli_interface::args::{CommitArgs, GitieArgs, GitieSubCommand, ReviewArgs, args_contain_help, should_use_ai};
+use crate::ai_module::explainer::{explain_git_error, explain_git_command_output};
+use crate::cli_interface::args::{CommitArgs, GitieArgs, GitieSubCommand, ReviewArgs, args_contain_help, should_use_ai, generate_gitie_help};
 use crate::command_processing::commit::handle_commit;
 use crate::command_processing::review::{handle_review, handle_commit_with_review};
 use crate::config_management::settings::AppConfig;
@@ -270,10 +270,14 @@ async fn main() -> Result<(), AppError> {
     let need_help = args_contain_help(&filtered_args);
     let use_ai = should_use_ai(&filtered_args);
     
-    if need_help && use_ai {
-        tracing::info!("检测到help标志和AI支持");
-        // 获取完整的帮助文本
-        let complete_help = match execute_git_command_and_capture_output(&["--help".to_string()]) {
+    if need_help {
+        tracing::info!("检测到help标志");
+        
+        // 获取gitie自定义帮助
+        let gitie_help = generate_gitie_help();
+        
+        // 获取完整的git帮助文本
+        let git_help = match execute_git_command_and_capture_output(&["--help".to_string()]) {
             Ok(output) => output.stdout,
             Err(e) => {
                 eprintln!("获取git帮助信息失败: {}", e);
@@ -281,8 +285,27 @@ async fn main() -> Result<(), AppError> {
             }
         };
         
-        // 直接显示git帮助
-        println!("{}", complete_help);
+        // 合并帮助信息
+        let combined_help = format!("{}\n\n== 标准 Git 帮助 ==\n\n{}", gitie_help, git_help);
+        
+        if use_ai {
+            // 使用AI解释帮助内容
+            match ai_module::explainer::explain_git_command_output(&config, &combined_help).await {
+                Ok(explanation) => {
+                    // 输出AI解释和原始帮助
+                    println!("{}", explanation);
+                },
+                Err(e) => {
+                    tracing::warn!("无法获取AI帮助解释: {}", e);
+                    // 如果AI解释失败，仍然显示原始帮助
+                    println!("{}", combined_help);
+                }
+            }
+        } else {
+            // 不使用AI，直接显示组合帮助
+            println!("{}", combined_help);
+        }
+        
         return Ok(());
     }
     
