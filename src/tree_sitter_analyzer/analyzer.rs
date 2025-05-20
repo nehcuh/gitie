@@ -12,15 +12,13 @@ use super::core::{ // Assuming core.rs will export these
     FileAst, DiffHunk, ChangeType, 
     FileAnalysis, DiffAnalysis, AffectedNode,
     ChangeAnalysis, GitDiff, HunkRange, ChangedFile,
-    LineRange,
+    ChangePattern, ChangeScope,
     get_tree_sitter_rust, get_tree_sitter_java, 
     get_tree_sitter_python, get_tree_sitter_go,
     // calculate_hash, // Assuming this will be in core or a utils.rs
     // parse_git_diff, // Assuming this will be in core or a utils.rs
 };
-use super::java::{
-    JavaProjectStructure, JavaClass, JavaMethod, JavaMethodParam, JavaClassRelation, JavaRelationType
-};
+use super::java::JavaProjectStructure;
 use super::java::{ // Import functions from java.rs module
     extract_java_package_name, extract_java_imports, extract_java_class_name,
     extract_java_class_relations, extract_java_methods,
@@ -470,15 +468,28 @@ impl TreeSitterAnalyzer {
     // These are complex and will require careful porting from the original file.
 
     pub fn analyze_diff(&mut self, diff_text: &str) -> Result<DiffAnalysis, TreeSitterError> {
-        // This is a placeholder. The actual implementation will involve:
-        // 1. Parsing the diff_text (e.g., using a diff parsing library or custom logic)
-        //    to get a list of FileDiff objects.
-        //    The `parse_git_diff` function from the original file needs to be integrated or called.
-        //    Let's assume we have a function `super::core::parse_git_diff`
+        // Parse the diff text to get structured representation
         let git_diff = super::core::parse_git_diff(diff_text)?;
 
-
         let mut file_analyses = Vec::new();
+        let mut total_affected_nodes = 0;
+        let mut language_counts = HashMap::new();
+        let mut total_additions = 0;
+        let mut total_deletions = 0;
+        let mut total_modifications = 0;
+        
+        // 收集变更统计信息
+        let mut function_changes = 0;
+        let mut type_changes = 0;
+        let mut method_changes = 0;
+        let mut interface_changes = 0;
+        let mut other_changes = 0;
+        
+        // 记录语言特定变更
+        let mut java_changes = 0;
+        let mut rust_changes = 0;
+        let mut _python_changes = 0;
+        let mut _go_changes = 0;
 
         for file_diff_info in &git_diff.changed_files {
             match file_diff_info.change_type {
@@ -494,23 +505,73 @@ impl TreeSitterAnalyzer {
                     // 首先检查文件类型是否支持 tree-sitter 分析
                     match self.detect_language(&file_path) {
                         Ok(Some(lang_id)) => {
+                            // 统计语言分布
+                            *language_counts.entry(lang_id.clone()).or_insert(0) += 1;
+                            
+                            // 记录各语言变更
+                            match lang_id.as_str() {
+                                "java" => java_changes += 1,
+                                "rust" => rust_changes += 1,
+                                "python" => _python_changes += 1,
+                                "go" => _go_changes += 1,
+                                _ => {}
+                            }
+                            
                             // 支持的编程语言，继续 tree-sitter 分析
                             match self.parse_file(&file_path) {
                                 Ok(file_ast) => {
                                     // Analyze changes within this file based on hunks
                                     let affected_nodes = self.analyze_file_changes(&file_ast, &file_diff_info.hunks)?;
+                                    total_affected_nodes += affected_nodes.len();
                                     
-                                    // Generate a summary for this file (placeholder)
-                                    let summary = format!("File {:?} was {:?}. Affected nodes: {}", 
-                                                        file_ast.path, file_diff_info.change_type, affected_nodes.len());
+                                    // 统计不同类型的变更
+                                    for node in &affected_nodes {
+                                        match node.node_type.as_str() {
+                                            "function" | "test_function" => function_changes += 1,
+                                            "class" | "struct" | "enum" | "interface" | "type" | "class_structure" | "debuggable_struct" => type_changes += 1,
+                                            "method" | "overridden_method" | "api_endpoint" => method_changes += 1,
+                                            "trait" => interface_changes += 1,
+                                            _ => other_changes += 1,
+                                        }
+                                        
+                                        if let Some(change_type) = &node.change_type {
+                                            match change_type.as_str() {
+                                                "added" | "added_content" => total_additions += 1,
+                                                "deleted" => total_deletions += 1,
+                                                "modified" | "modified_with_deletion" => total_modifications += 1,
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                    
+                                    // 根据文件语言和变更类型生成更有意义的摘要
+                                    let summary = match file_ast.language_id.as_str() {
+                                        "java" => self.generate_java_file_summary(&file_ast, &affected_nodes),
+                                        "rust" => self.generate_rust_file_summary(&file_ast, &affected_nodes),
+                                        _ => format!("文件 {} 被{}。影响了 {} 个代码结构。", 
+                                                file_ast.path.display(), 
+                                                match file_diff_info.change_type {
+                                                    ChangeType::Added => "新增",
+                                                    ChangeType::Modified => "修改",
+                                                    _ => "变更"
+                                                }, 
+                                                affected_nodes.len()),
+                                    };
 
                                     file_analyses.push(FileAnalysis {
                                         path: file_ast.path.clone(),
                                         language: file_ast.language_id.clone(),
                                         change_type: file_diff_info.change_type.clone(),
-                                        affected_nodes,
+                                        affected_nodes: affected_nodes.clone(),
                                         summary: Some(summary),
                                     });
+                                    
+                                    // 输出更详细的变更日志
+                                    for node in &affected_nodes {
+                                        if let Some(change_type) = &node.change_type {
+                                            debug!("变更: {} {} - {}", change_type, node.node_type, node.name);
+                                        }
+                                    }
                                 },
                                 Err(e) => {
                                     error!("Failed to parse file {:?}: {:?}", file_path, e);
@@ -519,70 +580,601 @@ impl TreeSitterAnalyzer {
                                         language: lang_id,
                                         change_type: file_diff_info.change_type.clone(),
                                         affected_nodes: Vec::new(),
-                                        summary: Some(format!("Error parsing file: {:?}", e)),
+                                        summary: Some(format!("无法解析文件: {}", e)),
                                     });
                                 }
                             }
                         },
                         Ok(None) => {
-                            // 不支持 tree-sitter 分析的文件类型（如文档、配置文件等）
-                            debug!("Skipping tree-sitter analysis for non-code file: {:?}", file_path);
-                            file_analyses.push(FileAnalysis {
-                                path: file_path.clone(),
-                                language: "text".to_string(),
-                                change_type: file_diff_info.change_type.clone(),
-                                affected_nodes: Vec::new(),
-                                summary: Some(format!("File {:?} was {:?} (non-code file).", file_path, file_diff_info.change_type)),
-                            });
-                        },
-                        Err(e) => {
-                            // 未知扩展名或其他错误
-                            warn!("Unknown file type in diff, skipping analysis: {:?} - {:?}", file_path, e);
+                            debug!("File {:?} has unsupported language. Using simple analysis.", file_path);
+                            // For unsupported languages, add a placeholder analysis
                             file_analyses.push(FileAnalysis {
                                 path: file_path.clone(),
                                 language: "unknown".to_string(),
                                 change_type: file_diff_info.change_type.clone(),
                                 affected_nodes: Vec::new(),
-                                summary: Some(format!("Unknown file type: {:?}", file_path)),
+                                summary: Some(format!("不支持的文件类型，无法进行 tree-sitter 分析")),
+                            });
+                        },
+                        Err(e) => {
+                            error!("Error detecting language for file {:?}: {:?}", file_path, e);
+                            file_analyses.push(FileAnalysis {
+                                path: file_path.clone(),
+                                language: "error".to_string(),
+                                change_type: file_diff_info.change_type.clone(),
+                                affected_nodes: Vec::new(),
+                                summary: Some(format!("检测文件语言时出错: {}", e)),
                             });
                         }
                     }
-                }
-                // 处理已删除或重命名的文件
-                ChangeType::Deleted | ChangeType::Renamed => {
-                     // For deleted/renamed files, we might not parse the new content (if deleted)
-                     // or we'd parse the new path if renamed.
-                     // The FileDiff struct should ideally hold old_path and new_path for renames.
-                    let path_to_log = &file_diff_info.path; // Use the available path field
+                },
+                // For other change types like deletions, just add an analysis entry
+                _ => {
                     file_analyses.push(FileAnalysis {
-                        path: path_to_log.clone(),
-                        language: match self.detect_language(path_to_log) {
-                            Ok(Some(lang)) => lang,
-                            Ok(None) => "text".to_string(),
-                            Err(_) => "unknown".to_string(),
-                        },
+                        path: file_diff_info.path.clone(),
+                        language: "unknown".to_string(), // We might not be able to determine language for deleted files
                         change_type: file_diff_info.change_type.clone(),
-                        affected_nodes: Vec::new(), // No AST to analyze for purely deleted
-                        summary: Some(format!("File {:?} was {:?}.", path_to_log, file_diff_info.change_type)),
+                        affected_nodes: Vec::new(),
+                        summary: Some(format!("文件被{}", match file_diff_info.change_type {
+                            ChangeType::Deleted => "删除",
+                            ChangeType::Renamed => "重命名",
+                            _ => "其他操作"
+                        })),
                     });
                 }
-                _ => {} // Handle other change types like Copied, TypeChanged if necessary
             }
         }
+
+        // 确定变更模式
+        let change_pattern = self.determine_change_pattern(
+            &file_analyses, 
+            function_changes, 
+            type_changes, 
+            method_changes, 
+            interface_changes,
+            java_changes,
+            rust_changes,
+            total_additions,
+            total_deletions
+        );
         
-        // Generate a simple overall summary
-        let overall_summary = format!("Analyzed {} files with {} total changes", 
-            git_diff.changed_files.len(),
-            git_diff.changed_files.iter().map(|f| f.hunks.len()).sum::<usize>());
+        // 确定变更范围
+        let change_scope = self.determine_change_scope(
+            total_affected_nodes,
+            total_additions, 
+            total_deletions, 
+            total_modifications,
+            type_changes,
+            method_changes,
+            interface_changes
+        );
+        
+        // 生成整体摘要
+        let languages_summary = if !language_counts.is_empty() {
+            let mut lang_parts = Vec::new();
+            for (lang, count) in &language_counts {
+                lang_parts.push(format!("{} ({}个文件)", lang, count));
+            }
+            format!("涉及语言: {}", lang_parts.join(", "))
+        } else {
+            "未检测到支持的编程语言".to_string()
+        };
+        
+        let changes_summary = format!(
+            "变更统计: {}个新增, {}个删除, {}个修改，共影响{}个代码结构",
+            total_additions, 
+            total_deletions, 
+            total_modifications,
+            total_affected_nodes
+        );
+        
+        let structure_summary = format!(
+            "结构变更: {}个函数, {}个类型, {}个方法, {}个接口, {}个其他",
+            function_changes,
+            type_changes,
+            method_changes,
+            interface_changes,
+            other_changes
+        );
+        
+        let pattern_description = match &change_pattern {
+            ChangePattern::FeatureImplementation => "新功能实现",
+            ChangePattern::BugFix => "bug修复",
+            ChangePattern::Refactoring => "代码重构",
+            ChangePattern::ModelChange => "模型变更",
+            ChangePattern::BehaviorChange => "行为变更",
+            ChangePattern::ConfigurationChange => "配置变更",
+            ChangePattern::MixedChange => "混合变更",
+            ChangePattern::LanguageSpecificChange(lang_change) => {
+                if lang_change.starts_with("Java") {
+                    "Java特定变更"
+                } else if lang_change.starts_with("Rust") {
+                    "Rust特定变更"
+                } else {
+                    "特定语言变更"
+                }
+            }
+        };
+        
+        let scope_description = match &change_scope {
+            ChangeScope::Minor => "轻微",
+            ChangeScope::Moderate => "中等",
+            ChangeScope::Major => "重大",
+        };
+        
+        let overall_summary = format!(
+            "变更分析完成。{}\n{}\n{}\n变更类型: {} ({})",
+            languages_summary,
+            changes_summary,
+            structure_summary,
+            pattern_description,
+            scope_description
+        );
+
+        // 构建完整的变更分析结果
+        let change_analysis = ChangeAnalysis {
+            function_changes,
+            type_changes,
+            method_changes,
+            interface_changes,
+            other_changes,
+            change_pattern,
+            change_scope,
+        };
 
         Ok(DiffAnalysis {
             file_analyses,
             overall_summary,
-            change_analysis: ChangeAnalysis::default(), // Placeholder
+            change_analysis,
         })
     }
 
     fn analyze_file_changes(&self, file_ast: &FileAst, hunks: &[DiffHunk]) -> Result<Vec<AffectedNode>, TreeSitterError> {
+        // 根据文件语言调用相应的分析方法
+        match file_ast.language_id.as_str() {
+            "java" => self.analyze_java_file_changes(file_ast, hunks),
+            "rust" => self.analyze_rust_file_changes(file_ast, hunks),
+            // 其他语言可以在这里添加
+            _ => self.analyze_generic_file_changes(file_ast, hunks),
+        }
+    }
+    
+    fn analyze_java_file_changes(&self, file_ast: &FileAst, hunks: &[DiffHunk]) -> Result<Vec<AffectedNode>, TreeSitterError> {
+        let mut affected_nodes = self.analyze_generic_file_changes(file_ast, hunks)?;
+        
+        // Java 特定分析逻辑
+        let source_bytes = file_ast.source.as_bytes();
+        
+        // 分析类结构变更
+        for node in &mut affected_nodes {
+            // 对类定义的特殊处理
+            if node.node_type == "class" {
+                // 标记为结构变更
+                node.node_type = "class_structure".to_string();
+                
+                // 额外分析类中的方法和字段
+                if let Some(content) = &node.content {
+                    // 判断是否含有特定注解
+                    if content.contains("@Service") || content.contains("@Component") || 
+                       content.contains("@Controller") || content.contains("@Repository") {
+                        node.node_type = "spring_component".to_string();
+                    }
+                    
+                    if content.contains("@Entity") || content.contains("@Table") {
+                        node.node_type = "jpa_entity".to_string();
+                    }
+                }
+            }
+            
+            // 对方法的特殊处理
+            if node.node_type == "method" {
+                // 分析方法签名变更
+                if let Some(content) = &node.content {
+                    if content.contains("@Override") {
+                        node.node_type = "overridden_method".to_string();
+                    }
+                    
+                    // 检查是否是API端点
+                    if content.contains("@GetMapping") || content.contains("@PostMapping") || 
+                       content.contains("@RequestMapping") {
+                        node.node_type = "api_endpoint".to_string();
+                    }
+                }
+            }
+        }
+        
+        Ok(affected_nodes)
+    }
+    
+    fn analyze_rust_file_changes(&self, file_ast: &FileAst, hunks: &[DiffHunk]) -> Result<Vec<AffectedNode>, TreeSitterError> {
+        let mut affected_nodes = self.analyze_generic_file_changes(file_ast, hunks)?;
+        
+        // Rust 特定分析逻辑
+        let source_bytes = file_ast.source.as_bytes();
+        
+        for node in &mut affected_nodes {
+            // 对结构体的特殊处理
+            if node.node_type == "struct" {
+                // 检查是否实现了特定 trait
+                if let Some(content) = &node.content {
+                    if content.contains("impl Debug") || content.contains("#[derive(Debug") {
+                        node.node_type = "debuggable_struct".to_string();
+                    }
+                    
+                    if content.contains("pub ") {
+                        node.is_public = true;
+                    }
+                }
+            }
+            
+            // 对函数的特殊处理
+            if node.node_type == "function" {
+                if let Some(content) = &node.content {
+                    // 检查是否是测试函数
+                    if content.contains("#[test") {
+                        node.node_type = "test_function".to_string();
+                    }
+                    
+                    // 检查是否有宏
+                    if content.contains("macro_rules!") {
+                        node.node_type = "macro".to_string();
+                    }
+                }
+            }
+        }
+        
+        Ok(affected_nodes)
+    }
+    
+    fn generate_java_file_summary(&self, file_ast: &FileAst, affected_nodes: &[AffectedNode]) -> String {
+        let _source_bytes = file_ast.source.as_bytes(); // Keep but mark as unused
+        // 统计各类型节点数量
+        let mut class_count = 0;
+        let mut method_count = 0;
+        let mut field_count = 0;
+        let mut api_count = 0;
+        let mut spring_component_count = 0;
+        let mut jpa_entity_count = 0;
+        
+        // 统计变更类型
+        let mut additions = 0;
+        let mut deletions = 0;
+        let mut modifications = 0;
+        
+        for node in affected_nodes {
+            match node.node_type.as_str() {
+                "class" | "class_structure" => class_count += 1,
+                "method" | "overridden_method" => method_count += 1,
+                "field" => field_count += 1,
+                "api_endpoint" => api_count += 1,
+                "spring_component" => spring_component_count += 1,
+                "jpa_entity" => jpa_entity_count += 1,
+                _ => {}
+            }
+            
+            if let Some(change_type) = &node.change_type {
+                match change_type.as_str() {
+                    "added" | "added_content" => additions += 1,
+                    "deleted" => deletions += 1,
+                    "modified" | "modified_with_deletion" => modifications += 1,
+                    _ => {}
+                }
+            }
+        }
+        
+        // 生成摘要
+        let mut summary = format!("Java文件 {} 变更分析: ", file_ast.path.display());
+        
+        if affected_nodes.is_empty() {
+            return format!("{}未检测到结构性变更", summary);
+        }
+        
+        // 添加结构变更摘要
+        let mut structure_summary = Vec::new();
+        if class_count > 0 {
+            structure_summary.push(format!("{}个类", class_count));
+        }
+        if method_count > 0 {
+            structure_summary.push(format!("{}个方法", method_count));
+        }
+        if field_count > 0 {
+            structure_summary.push(format!("{}个字段", field_count));
+        }
+        
+        if !structure_summary.is_empty() {
+            summary.push_str(&format!("影响了{}", structure_summary.join("、")));
+        }
+        
+        // 添加框架特定变更
+        if spring_component_count > 0 || jpa_entity_count > 0 || api_count > 0 {
+            summary.push_str("。包含");
+            let mut framework_summary = Vec::new();
+            
+            if spring_component_count > 0 {
+                framework_summary.push(format!("{}个Spring组件", spring_component_count));
+            }
+            if jpa_entity_count > 0 {
+                framework_summary.push(format!("{}个JPA实体", jpa_entity_count));
+            }
+            if api_count > 0 {
+                framework_summary.push(format!("{}个API端点", api_count));
+            }
+            
+            summary.push_str(&framework_summary.join("、"));
+        }
+        
+        // 添加变更类型摘要
+        summary.push_str(&format!("。共有{}个新增、{}个删除、{}个修改", 
+                                 additions, deletions, modifications));
+        
+        summary
+    }
+    
+    fn generate_rust_file_summary(&self, file_ast: &FileAst, affected_nodes: &[AffectedNode]) -> String {
+        let _source_bytes = file_ast.source.as_bytes(); // Keep but mark as unused
+        // 统计各类型节点数量
+        let mut struct_count = 0;
+        let mut enum_count = 0;
+        let mut trait_count = 0;
+        let mut impl_count = 0;
+        let mut function_count = 0;
+        let mut macro_count = 0;
+        let mut test_count = 0;
+        
+        // 统计变更类型
+        let mut additions = 0;
+        let mut deletions = 0;
+        let mut modifications = 0;
+        let mut public_items = 0;
+        
+        for node in affected_nodes {
+            match node.node_type.as_str() {
+                "struct" | "debuggable_struct" => struct_count += 1,
+                "enum" => enum_count += 1,
+                "trait" => trait_count += 1,
+                "impl" => impl_count += 1,
+                "function" => function_count += 1,
+                "macro" => macro_count += 1,
+                "test_function" => test_count += 1,
+                _ => {}
+            }
+            
+            if node.is_public {
+                public_items += 1;
+            }
+            
+            if let Some(change_type) = &node.change_type {
+                match change_type.as_str() {
+                    "added" | "added_content" => additions += 1,
+                    "deleted" => deletions += 1,
+                    "modified" | "modified_with_deletion" => modifications += 1,
+                    _ => {}
+                }
+            }
+        }
+        
+        // 生成摘要
+        let mut summary = format!("Rust文件 {} 变更分析: ", file_ast.path.display());
+        
+        if affected_nodes.is_empty() {
+            return format!("{}未检测到结构性变更", summary);
+        }
+        
+        // 添加结构变更摘要
+        let mut structure_summary = Vec::new();
+        if struct_count > 0 {
+            structure_summary.push(format!("{}个结构体", struct_count));
+        }
+        if enum_count > 0 {
+            structure_summary.push(format!("{}个枚举", enum_count));
+        }
+        if trait_count > 0 {
+            structure_summary.push(format!("{}个特征", trait_count));
+        }
+        if impl_count > 0 {
+            structure_summary.push(format!("{}个实现", impl_count));
+        }
+        if function_count > 0 {
+            structure_summary.push(format!("{}个函数", function_count));
+        }
+        if macro_count > 0 {
+            structure_summary.push(format!("{}个宏", macro_count));
+        }
+        
+        if !structure_summary.is_empty() {
+            summary.push_str(&format!("影响了{}", structure_summary.join("、")));
+        }
+        
+        // 添加测试相关信息
+        if test_count > 0 {
+            summary.push_str(&format!("。包含{}个测试函数", test_count));
+        }
+        
+        // 添加可见性信息
+        if public_items > 0 {
+            summary.push_str(&format!("。其中{}个为公开项", public_items));
+        }
+        
+        // 添加变更类型摘要
+        summary.push_str(&format!("。共有{}个新增、{}个删除、{}个修改", 
+                                 additions, deletions, modifications));
+        
+        summary
+    }
+    
+    // 确定变更模式（FeatureImplementation, BugFix, Refactoring等）
+    fn determine_change_pattern(
+        &self,
+        file_analyses: &[FileAnalysis],
+        function_changes: usize,
+        type_changes: usize,
+        method_changes: usize,
+        interface_changes: usize,
+        java_changes: usize,
+        rust_changes: usize,
+        total_additions: usize,
+        total_deletions: usize
+    ) -> ChangePattern {
+        // 如果变更主要是Java特定的
+        if java_changes > 0 && java_changes > rust_changes {
+            // 检查是否有SpringBoot或JPA相关的变更
+            let has_spring_changes = file_analyses.iter().any(|analysis| {
+                analysis.affected_nodes.iter().any(|node| {
+                    node.node_type == "spring_component" || node.node_type == "api_endpoint"
+                })
+            });
+            
+            let has_jpa_changes = file_analyses.iter().any(|analysis| {
+                analysis.affected_nodes.iter().any(|node| node.node_type == "jpa_entity")
+            });
+        
+            // Variables remain in local scope
+            
+            let has_visibility_changes = file_analyses.iter().any(|analysis| {
+                analysis.affected_nodes.iter().any(|node| {
+                    if let Some(content) = &node.content {
+                        content.contains("public") || content.contains("private") || 
+                        content.contains("protected") || content.contains("package")
+                    } else {
+                        false
+                    }
+                })
+            });
+            
+            if has_spring_changes || has_jpa_changes {
+                return ChangePattern::LanguageSpecificChange("JavaStructuralChange".to_string());
+            } else if has_visibility_changes {
+                return ChangePattern::LanguageSpecificChange("JavaVisibilityChange".to_string());
+            }
+        }
+        
+        // 如果变更主要是Rust特定的
+        if rust_changes > 0 && rust_changes > java_changes {
+            // 检查特定的Rust变更模式
+            let has_trait_impl = file_analyses.iter().any(|analysis| {
+                analysis.affected_nodes.iter().any(|node| {
+                    node.node_type == "trait" || 
+                    (node.node_type == "impl" && node.content.as_ref().map_or(false, |c| c.contains("impl")))
+                })
+            });
+            
+            let has_macro_changes = file_analyses.iter().any(|analysis| {
+                analysis.affected_nodes.iter().any(|node| node.node_type == "macro")
+            });
+            
+            if has_trait_impl {
+                return ChangePattern::LanguageSpecificChange("RustTraitImplementation".to_string());
+            } else if has_macro_changes {
+                return ChangePattern::LanguageSpecificChange("RustMacroChange".to_string());
+            }
+        }
+        
+        // 通用变更模式判断
+        let config_changes = file_analyses.iter().any(|analysis| {
+            analysis.path.to_string_lossy().contains("config") || 
+            analysis.path.to_string_lossy().ends_with(".properties") ||
+            analysis.path.to_string_lossy().ends_with(".yml") ||
+            analysis.path.to_string_lossy().ends_with(".toml")
+        });
+        
+        if config_changes {
+            return ChangePattern::ConfigurationChange;
+        }
+        
+        let test_changes = file_analyses.iter().any(|analysis| {
+            analysis.path.to_string_lossy().contains("test") ||
+            analysis.affected_nodes.iter().any(|node| node.node_type == "test_function")
+        });
+            
+        if test_changes {
+            return ChangePattern::BugFix; // 测试变更通常与bug修复相关
+        }
+        
+        // 检查是否为bug修复
+        let has_bug_fix_keywords = file_analyses.iter().any(|analysis| {
+            analysis.affected_nodes.iter().any(|node| {
+                if let Some(content) = &node.content {
+                    content.to_lowercase().contains("fix") ||
+                    content.to_lowercase().contains("bug") ||
+                    content.to_lowercase().contains("issue") ||
+                    content.to_lowercase().contains("error") ||
+                    content.to_lowercase().contains("crash") ||
+                    content.to_lowercase().contains("exception")
+                } else {
+                    false
+                }
+            })
+        });
+        
+        if has_bug_fix_keywords {
+            return ChangePattern::BugFix;
+        }
+        
+        // 检查是否为重构
+        let has_refactor_keywords = file_analyses.iter().any(|analysis| {
+            analysis.affected_nodes.iter().any(|node| {
+                if let Some(content) = &node.content {
+                    content.to_lowercase().contains("refactor") ||
+                    content.to_lowercase().contains("clean") ||
+                    content.to_lowercase().contains("improve") ||
+                    content.to_lowercase().contains("simplify") ||
+                    content.to_lowercase().contains("restructure")
+                } else {
+                    false
+                }
+            })
+        });
+        
+        if has_refactor_keywords {
+            return ChangePattern::Refactoring;
+        }
+        
+        // 检查是否为模型/接口变更
+        if type_changes > 0 || interface_changes > 0 {
+            if method_changes > 0 {
+                return ChangePattern::BehaviorChange; // 行为变更
+            } else {
+                return ChangePattern::ModelChange; // 模型变更
+            }
+        }
+        
+        // 检查是否为新功能实现
+        if function_changes > 0 && total_additions > 0 && total_deletions > 0 && total_additions > total_deletions * 2 {
+            return ChangePattern::FeatureImplementation;
+        }
+        
+        // 默认为混合变更
+        ChangePattern::MixedChange
+    }
+    
+    // 确定变更范围(Minor, Moderate, Major)
+    fn determine_change_scope(
+        &self,
+        total_affected_nodes: usize,
+        total_additions: usize,
+        total_deletions: usize,
+        _total_modifications: usize,
+        type_changes: usize,
+        method_changes: usize,
+        interface_changes: usize
+    ) -> ChangeScope {
+        // 接口和类型变更是最严重的
+        if interface_changes > 2 || type_changes > 5 {
+            return ChangeScope::Major;
+        }
+        
+        // 中等数量的变更
+        if total_affected_nodes > 20 || 
+           total_additions + total_deletions > 50 ||
+           method_changes > 3 {
+            return ChangeScope::Moderate;
+        }
+        
+        // 默认为轻微变更
+        ChangeScope::Minor
+    }
+    
+    fn analyze_generic_file_changes(&self, file_ast: &FileAst, hunks: &[DiffHunk]) -> Result<Vec<AffectedNode>, TreeSitterError> {
         let mut affected_nodes = Vec::new();
         let query = self.queries.get(&file_ast.language_id).ok_or_else(|| 
             TreeSitterError::QueryError(format!("No query found for language {}", file_ast.language_id))
@@ -615,7 +1207,6 @@ impl TreeSitterAnalyzer {
                  continue;
             }
 
-
             let mut hunk_end_byte = source_bytes.len(); // Default to end of file
             current_line = 0; // Reset for end_byte calculation
             for (i, byte) in source_bytes.iter().enumerate() {
@@ -637,18 +1228,40 @@ impl TreeSitterAnalyzer {
                  }
             }
 
+            // 分析每个 hunk 中的添加和删除操作
+            let mut additions = Vec::new();
+            let mut deletions = Vec::new();
+            
+            for line in &hunk.lines {
+                if line.starts_with('+') {
+                    additions.push(line.trim_start_matches('+').to_string());
+                } else if line.starts_with('-') {
+                    deletions.push(line.trim_start_matches('-').to_string());
+                }
+            }
+            
+            // 计算变更类型
+            let change_operation = if !additions.is_empty() && !deletions.is_empty() {
+                "modified"
+            } else if !additions.is_empty() {
+                "added"
+            } else if !deletions.is_empty() {
+                "deleted"
+            } else {
+                "unchanged"
+            };
 
             let mut cursor = tree_sitter::QueryCursor::new();
             let matches = cursor.matches(query, tree_root, source_bytes);
 
-            for mat in matches {
-                for capture in mat.captures {
+            for m in matches {
+                for capture in m.captures {
                     let node = capture.node;
                     let node_range = node.byte_range();
 
                     // Check if the node overlaps with the hunk's byte range
                     if node_range.start < hunk_end_byte && node_range.end > hunk_start_byte {
-                        let node_name_capture = mat.captures.iter().find(|c| 
+                        let node_name_capture = m.captures.iter().find(|c| 
                             query.capture_names()[c.index as usize].ends_with(".name")
                         );
                         
@@ -663,14 +1276,29 @@ impl TreeSitterAnalyzer {
                         
                         let start_line = node.start_position().row;
                         let end_line = node.end_position().row;
+                        
+                        // 获取节点内容
+                        let content = node.utf8_text(source_bytes).unwrap_or("").to_string();
+                        
+                        // 确定变更的详细类型
+                        let change_details = if content.contains(&additions.join("\n")) {
+                            "added_content"
+                        } else if !deletions.is_empty() && deletions.iter().any(|d| content.contains(d)) {
+                            "modified_with_deletion"
+                        } else {
+                            change_operation
+                        };
 
                         affected_nodes.push(AffectedNode {
                             node_type: kind_capture_index.to_string(),
                             name,
                             range: (node_range.start, node_range.end),
                             is_public: self.is_node_public(&node, file_ast),
-                            content: Some(node.utf8_text(source_bytes).unwrap_or("").to_string()),
+                            content: Some(content),
                             line_range: (start_line, end_line),
+                            change_type: Some(change_details.to_string()),
+                            additions: if !additions.is_empty() { Some(additions.clone()) } else { None },
+                            deletions: if !deletions.is_empty() { Some(deletions.clone()) } else { None },
                         });
                     }
                 }

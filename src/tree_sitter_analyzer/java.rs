@@ -270,6 +270,9 @@ pub fn analyze_java_file_structure_impl(file_ast: &FileAst, analyzer: &TreeSitte
                     is_public: analyzer.is_node_public(&node, file_ast), // Call via analyzer instance
                     content: Some(node.utf8_text(file_ast.source.as_bytes()).unwrap_or("").to_string()),
                     line_range: (node.start_position().row, node.end_position().row),
+                    change_type: None,
+                    additions: None,
+                    deletions: None,
                 });
             }
         }

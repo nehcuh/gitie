@@ -200,10 +200,11 @@ pub struct AffectedNode {
     pub name: String,
     pub range: (usize, usize),
     pub is_public: bool,
-    #[allow(dead_code)]
     pub content: Option<String>,
-    #[allow(dead_code)]
     pub line_range: (usize, usize),
+    pub change_type: Option<String>,    // 新增：变更类型（added, deleted, modified）
+    pub additions: Option<Vec<String>>, // 新增：添加的行
+    pub deletions: Option<Vec<String>>, // 新增：删除的行
 }
 
 impl AffectedNode {
@@ -216,6 +217,9 @@ impl AffectedNode {
             is_public,
             content: None,
             line_range: (0, 0),
+            change_type: None,
+            additions: None,
+            deletions: None,
         }
     }
 }
