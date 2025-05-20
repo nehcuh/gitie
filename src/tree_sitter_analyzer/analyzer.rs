@@ -15,9 +15,11 @@ use super::core::{ // Assuming core.rs will export these
     LineRange,
     get_tree_sitter_rust, get_tree_sitter_java, 
     get_tree_sitter_python, get_tree_sitter_go,
-    JavaProjectStructure, // Now imported from core instead of java
     // calculate_hash, // Assuming this will be in core or a utils.rs
     // parse_git_diff, // Assuming this will be in core or a utils.rs
+};
+use super::java::{
+    JavaProjectStructure, JavaClass, JavaMethod, JavaMethodParam, JavaClassRelation, JavaRelationType
 };
 use super::java::{ // Import functions from java.rs module
     extract_java_package_name, extract_java_imports, extract_java_class_name,

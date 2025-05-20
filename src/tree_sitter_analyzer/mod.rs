@@ -13,7 +13,9 @@ pub mod parse_utils;
 pub use self::analyzer::TreeSitterAnalyzer;
 pub use self::simple_diff::{parse_simple_diff, detect_language_from_path, summarize_languages};
 pub use self::parse_utils::{parse_git_diff_text, detect_language};
-// pub use self::java::JavaProjectStructure; // This is now in core.rs
+pub use self::java::JavaProjectStructure; // Moved back to java.rs
+pub use self::java::{JavaClass, JavaMethod, JavaMethodParam, JavaClassRelation, JavaRelationType, JavaPackage, JavaChangePattern};
+pub use self::rust::RustChangePattern;
 // Re-export language-specific functions if they are meant to be part of the public API of this module
 // For example, if you want to allow direct access to Java-specific parsing outside of the TreeSitterAnalyzer facade:
 // pub use self::java::{extract_java_package_name, extract_java_class_name};

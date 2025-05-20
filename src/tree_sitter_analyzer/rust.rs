@@ -3,9 +3,34 @@ use tree_sitter::{Node, Query};
 
 use crate::{
     core::errors::TreeSitterError,
-    tree_sitter_analyzer::core::{AffectedNode, FileAst},
+    tree_sitter_analyzer::core::{AffectedNode, FileAst, ChangePattern},
     tree_sitter_analyzer::analyzer::TreeSitterAnalyzer, // To access is_node_public
 };
+
+// Rust-specific change patterns
+pub enum RustChangePattern {
+    #[allow(dead_code)]
+    TraitImplementation,
+    #[allow(dead_code)]
+    MacroChange,
+    #[allow(dead_code)]
+    StructuralChange,
+    #[allow(dead_code)]
+    VisibilityChange,
+    #[allow(dead_code)]
+    LifetimeChange,
+}
+
+// Function to convert Rust-specific change patterns to generic ChangePattern
+pub fn to_generic_change_pattern(rust_pattern: RustChangePattern) -> ChangePattern {
+    ChangePattern::LanguageSpecificChange(match rust_pattern {
+        RustChangePattern::TraitImplementation => "RustTraitImplementation".to_string(),
+        RustChangePattern::MacroChange => "RustMacroChange".to_string(),
+        RustChangePattern::StructuralChange => "RustStructuralChange".to_string(),
+        RustChangePattern::VisibilityChange => "RustVisibilityChange".to_string(),
+        RustChangePattern::LifetimeChange => "RustLifetimeChange".to_string(),
+    })
+}
 
 #[allow(dead_code)]
 pub fn analyze_rust_file_structure_impl(file_ast: &FileAst, analyzer: &TreeSitterAnalyzer) -> Result<Vec<AffectedNode>, TreeSitterError> {
