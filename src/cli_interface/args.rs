@@ -1,16 +1,16 @@
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 
 /// Defines the command-line arguments specific to `gitie`'s own subcommands.
 /// This is typically used after determining that the invocation is not a global AI explanation request.
 #[derive(Parser, Debug)]
 #[clap(author="Huchen", version="0.1.0", about="Git with AI support (enabled by default)", long_about=None, name="gitie-subcommand-parser")]
 pub struct GitieArgs {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     pub command: GitieSubCommand,
 }
 
 /// Represents the specific subcommands that `gitie` itself understands.
-#[derive(Parser, Debug, Clone)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum GitieSubCommand {
     /// Handle git command operation, potentially with AI assistance for message generation.
     #[clap(alias = "cm")]
@@ -23,7 +23,7 @@ pub enum GitieSubCommand {
 }
 
 /// Arguments for the `commit` subcommand
-#[derive(Parser, Debug, Clone)]
+#[derive(Args, Debug, Clone)]
 pub struct CommitArgs {
     /// Use AI to generate the commit message (specific to the `commit` subcommand).
     /// Note: AI is enabled by default, this flag is kept for backward compatibility.
@@ -57,7 +57,7 @@ pub struct CommitArgs {
 }
 
 /// Arguments for the `review` subcommand
-#[derive(Parser, Debug, Clone)]
+#[derive(Args, Debug, Clone)]
 pub struct ReviewArgs {
     /// Analysis depth level
     #[clap(long, value_name = "LEVEL", default_value = "normal")]
@@ -180,20 +180,20 @@ pub fn should_use_tree_sitter(args: &[String]) -> bool {
 /// commands and options not included in standard git help.
 pub fn generate_gitie_help() -> String {
     let mut help = String::new();
-    
+
     // Add header and introduction
     help.push_str("gitie: Git with AI assistance\n");
     help.push_str("============================\n\n");
     help.push_str("gitie 是一个增强型 git 工具，提供 AI 辅助功能来简化 git 使用。\n");
     help.push_str("它可以像标准 git 一样使用，同时提供额外的 AI 功能。\n\n");
-    
+
     // Global options
     help.push_str("全局选项:\n");
     help.push_str("  --ai                启用 AI 功能（默认已启用）\n");
     help.push_str("  --noai              禁用 AI 功能\n");
     help.push_str("  -t, --tree-sitter   启用 Tree-sitter 语法分析以改进 AI 功能\n");
     help.push_str("                      可选值: shallow, medium (默认), deep\n\n");
-    
+
     // Subcommands
     help.push_str("Gitie 特有命令:\n");
     help.push_str("  commit (cm)         增强的 git commit 命令，提供 AI 生成提交信息\n");
@@ -205,7 +205,7 @@ pub fn generate_gitie_help() -> String {
     help.push_str("      -a, --all       自动暂存所有已跟踪的修改文件（类似 git commit -a）\n");
     help.push_str("      -m, --message   直接传递消息给提交\n");
     help.push_str("      --review        在提交前执行代码评审\n\n");
-    
+
     help.push_str("  review (rv)         执行 AI 辅助的代码评审\n");
     help.push_str("    选项:\n");
     help.push_str("      --depth=LEVEL   分析深度级别 (默认: normal)\n");
@@ -218,17 +218,17 @@ pub fn generate_gitie_help() -> String {
     help.push_str("      --review-ts     结合评审与 tree-sitter 分析\n");
     help.push_str("      --commit1=COMMIT 第一个提交引用\n");
     help.push_str("      --commit2=COMMIT 第二个提交引用（如果比较两个提交）\n\n");
-    
+
     help.push_str("标准 git 命令:\n");
     help.push_str("  所有标准 git 命令都可以正常使用，例如:\n");
     help.push_str("  gitie status, gitie add, gitie push, 等等\n\n");
-    
+
     help.push_str("示例:\n");
     help.push_str("  gitie commit        使用 AI 辅助生成提交信息\n");
     help.push_str("  gitie commit --noai 禁用 AI，使用标准 git commit\n");
     help.push_str("  gitie review        对当前更改执行 AI 辅助代码评审\n");
     help.push_str("  gitie review --depth=deep --focus=\"性能问题\"\n");
     help.push_str("                      执行深度代码评审，重点关注性能问题\n");
-    
+
     help
 }
