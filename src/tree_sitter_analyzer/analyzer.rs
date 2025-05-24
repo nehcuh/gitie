@@ -3683,9 +3683,10 @@ impl TreeSitterAnalyzer {
             };
 
             let mut cursor = tree_sitter::QueryCursor::new();
-            let matches = cursor.matches(query, tree_root, source_bytes);
+            // let matches = cursor.matches(query, tree_root, source_bytes);
 
-            for m in matches {
+            // for m in matches {
+            while let Some(m) = cursor.matches(query, tree_root, source_bytes).next() {
                 for capture in m.captures {
                     let node = capture.node;
                     let node_range = node.byte_range();
