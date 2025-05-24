@@ -33,6 +33,7 @@ tree-sitter-rust = "0.20.4"
 tree-sitter-java = "0.20.0"
 tree-sitter-python = "0.20.0"
 tree-sitter-go = "0.19.1"
+streaming-iterator = "0.1.9"
 
 
 [dev-dependencies]

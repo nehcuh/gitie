@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use streaming_iterator::StreamingIterator;
 use tracing::{debug, error, warn};
 use tree_sitter::{Language, Parser, Query}; // Added Language here
 
