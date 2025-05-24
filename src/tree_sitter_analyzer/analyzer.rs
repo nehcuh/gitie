@@ -513,8 +513,11 @@ impl TreeSitterAnalyzer {
         // 记录语言特定变更
         let mut java_changes = 0;
         let mut rust_changes = 0;
-        let mut _python_changes = 0;
-        let mut _go_changes = 0;
+        let mut python_changes = 0;
+        let mut go_changes = 0;
+        let mut c_changes = 0;
+        let mut cpp_changes = 0;
+        let mut js_changes = 0;
 
         for file_diff_info in &git_diff.changed_files {
             match file_diff_info.change_type {
@@ -540,8 +543,11 @@ impl TreeSitterAnalyzer {
                             match lang_id.as_str() {
                                 "java" => java_changes += 1,
                                 "rust" => rust_changes += 1,
-                                "python" => _python_changes += 1,
-                                "go" => _go_changes += 1,
+                                "python" => python_changes += 1,
+                                "go" => go_changes += 1,
+                                "c" => c_changes += 1,
+                                "cpp" => cpp_changes += 1,
+                                "js" => js_changes += 1,
                                 _ => {}
                             }
 
@@ -586,6 +592,19 @@ impl TreeSitterAnalyzer {
                                             .generate_java_file_summary(&file_ast, &affected_nodes),
                                         "rust" => self
                                             .generate_rust_file_summary(&file_ast, &affected_nodes),
+                                        "python" => self.generate_python_file_summary(
+                                            &file_ast,
+                                            &affected_nodes,
+                                        ),
+                                        "go" => self
+                                            .generate_go_file_summary(&file_ast, &affected_nodes),
+                                        "js" => self
+                                            .generate_js_file_summary(&file_ast, &affected_nodes),
+                                        "c" => {
+                                            self.generate_c_file_summary(&file_ast, &affected_nodes)
+                                        }
+                                        "cpp" => self
+                                            .generate_cpp_file_summary(&file_ast, &affected_nodes),
                                         _ => format!(
                                             "文件 {} 被{}。影响了 {} 个代码结构。",
                                             file_ast.path.display(),
@@ -1882,7 +1901,6 @@ impl TreeSitterAnalyzer {
         file_ast: &FileAst,
         affected_nodes: &[AffectedNode],
     ) -> String {
-        let _source_bytes = file_ast.source.as_bytes(); // Keep but mark as unused
         // 统计各类型节点数量
         let mut class_count = 0;
         let mut method_count = 0;
@@ -1890,21 +1908,34 @@ impl TreeSitterAnalyzer {
         let mut api_count = 0;
         let mut spring_component_count = 0;
         let mut jpa_entity_count = 0;
+        let mut annotation_interface_count = 0;
+        let mut test_method_count = 0;
+        let mut injected_field_count = 0;
+        let mut constructor_count = 0;
 
         // 统计变更类型
         let mut additions = 0;
         let mut deletions = 0;
         let mut modifications = 0;
 
+        // 其他未知类型
+        let mut other_types: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
         for node in affected_nodes {
             match node.node_type.as_str() {
-                "class" | "class_structure" => class_count += 1,
-                "method" | "overridden_method" => method_count += 1,
-                "field" => field_count += 1,
-                "api_endpoint" => api_count += 1,
+                "class_structure" => class_count += 1,
                 "spring_component" => spring_component_count += 1,
                 "jpa_entity" => jpa_entity_count += 1,
-                _ => {}
+                "api_endpoint" => api_count += 1,
+                "annotation_interface" => annotation_interface_count += 1,
+                "test_method" => test_method_count += 1,
+                "method" | "overridden_method" => method_count += 1,
+                "constructor" => constructor_count += 1,
+                "field" => field_count += 1,
+                "injected_field" => injected_field_count += 1,
+                // 统计其他类型
+                other => *other_types.entry(other.to_string()).or_insert(0) += 1,
             }
 
             if let Some(change_type) = &node.change_type {
@@ -1917,9 +1948,7 @@ impl TreeSitterAnalyzer {
             }
         }
 
-        // 生成摘要
-        let mut summary = format!("Java文件 {} 变更分析: ", file_ast.path.display());
-
+        let mut summary = format!("Java文件 {} 变更分析：", file_ast.path.display());
         if affected_nodes.is_empty() {
             return format!("{}未检测到结构性变更", summary);
         }
@@ -1929,33 +1958,42 @@ impl TreeSitterAnalyzer {
         if class_count > 0 {
             structure_summary.push(format!("{}个类", class_count));
         }
+        if spring_component_count > 0 {
+            structure_summary.push(format!("{}个Spring组件", spring_component_count));
+        }
+        if jpa_entity_count > 0 {
+            structure_summary.push(format!("{}个JPA实体", jpa_entity_count));
+        }
+        if annotation_interface_count > 0 {
+            structure_summary.push(format!("{}个注解接口", annotation_interface_count));
+        }
+        if api_count > 0 {
+            structure_summary.push(format!("{}个API端点", api_count));
+        }
+        if test_method_count > 0 {
+            structure_summary.push(format!("{}个测试方法", test_method_count));
+        }
+        if constructor_count > 0 {
+            structure_summary.push(format!("{}个构造函数", constructor_count));
+        }
+        if injected_field_count > 0 {
+            structure_summary.push(format!("{}个依赖注入字段", injected_field_count));
+        }
         if method_count > 0 {
             structure_summary.push(format!("{}个方法", method_count));
         }
         if field_count > 0 {
             structure_summary.push(format!("{}个字段", field_count));
         }
+        // 汇总其他类型
+        for (ty, cnt) in other_types {
+            if cnt > 0 && ty != "unknown" {
+                structure_summary.push(format!("{}个{}", cnt, ty));
+            }
+        }
 
         if !structure_summary.is_empty() {
             summary.push_str(&format!("影响了{}", structure_summary.join("、")));
-        }
-
-        // 添加框架特定变更
-        if spring_component_count > 0 || jpa_entity_count > 0 || api_count > 0 {
-            summary.push_str("。包含");
-            let mut framework_summary = Vec::new();
-
-            if spring_component_count > 0 {
-                framework_summary.push(format!("{}个Spring组件", spring_component_count));
-            }
-            if jpa_entity_count > 0 {
-                framework_summary.push(format!("{}个JPA实体", jpa_entity_count));
-            }
-            if api_count > 0 {
-                framework_summary.push(format!("{}个API端点", api_count));
-            }
-
-            summary.push_str(&framework_summary.join("、"));
         }
 
         // 添加变更类型摘要
@@ -1972,38 +2010,60 @@ impl TreeSitterAnalyzer {
         file_ast: &FileAst,
         affected_nodes: &[AffectedNode],
     ) -> String {
-        let _source_bytes = file_ast.source.as_bytes(); // Keep but mark as unused
-        // 统计各类型节点数量
+        // 各类型节点数量
         let mut struct_count = 0;
+        let mut debuggable_struct_count = 0;
         let mut enum_count = 0;
+        let mut debuggable_enum_count = 0;
         let mut trait_count = 0;
-        let mut impl_count = 0;
+        let mut trait_impl_count = 0;
+        let mut inherent_impl_count = 0;
         let mut function_count = 0;
-        let mut macro_count = 0;
-        let mut test_count = 0;
+        let mut public_function_count = 0;
+        let mut async_function_count = 0;
+        let mut unsafe_function_count = 0;
+        let mut test_function_count = 0;
+        let mut macro_definition_count = 0;
+        let mut macro_invocation_count = 0;
+        let mut constant_count = 0;
+        let mut static_count = 0;
+        let mut type_alias_count = 0;
+        let mut attribute_item_count = 0;
+        let mut public_items = 0;
 
-        // 统计变更类型
+        // 变更类型
         let mut additions = 0;
         let mut deletions = 0;
         let mut modifications = 0;
-        let mut public_items = 0;
+
+        let mut other_types: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
 
         for node in affected_nodes {
             match node.node_type.as_str() {
-                "struct" | "debuggable_struct" => struct_count += 1,
-                "enum" => enum_count += 1,
-                "trait" => trait_count += 1,
-                "impl" => impl_count += 1,
-                "function" => function_count += 1,
-                "macro" => macro_count += 1,
-                "test_function" => test_count += 1,
-                _ => {}
+                "struct_definition" => struct_count += 1,
+                "debuggable_struct" => debuggable_struct_count += 1,
+                "enum_definition" => enum_count += 1,
+                "debuggable_enum" => debuggable_enum_count += 1,
+                "trait_definition" => trait_count += 1,
+                "trait_impl" => trait_impl_count += 1,
+                "inherent_impl" => inherent_impl_count += 1,
+                "function_definition" => function_count += 1,
+                "public_function" => public_function_count += 1,
+                "async_function" => async_function_count += 1,
+                "unsafe_function" => unsafe_function_count += 1,
+                "test_function" => test_function_count += 1,
+                "macro_definition" => macro_definition_count += 1,
+                "macro_invocation" => macro_invocation_count += 1,
+                "constant_definition" => constant_count += 1,
+                "static_definition" => static_count += 1,
+                "type_alias_definition" => type_alias_count += 1,
+                "attribute_item" => attribute_item_count += 1,
+                _ => *other_types.entry(node.node_type.clone()).or_insert(0) += 1,
             }
-
             if node.is_public {
                 public_items += 1;
             }
-
             if let Some(change_type) = &node.change_type {
                 match change_type.as_str() {
                     "added" | "added_content" => additions += 1,
@@ -2014,49 +2074,1326 @@ impl TreeSitterAnalyzer {
             }
         }
 
-        // 生成摘要
-        let mut summary = format!("Rust文件 {} 变更分析: ", file_ast.path.display());
-
+        let mut summary = format!("Rust文件 {} 变更分析：", file_ast.path.display());
         if affected_nodes.is_empty() {
             return format!("{}未检测到结构性变更", summary);
         }
 
-        // 添加结构变更摘要
+        // 结构变更摘要
         let mut structure_summary = Vec::new();
         if struct_count > 0 {
             structure_summary.push(format!("{}个结构体", struct_count));
         }
+        if debuggable_struct_count > 0 {
+            structure_summary.push(format!("{}个可调试结构体", debuggable_struct_count));
+        }
         if enum_count > 0 {
             structure_summary.push(format!("{}个枚举", enum_count));
         }
-        if trait_count > 0 {
-            structure_summary.push(format!("{}个特征", trait_count));
+        if debuggable_enum_count > 0 {
+            structure_summary.push(format!("{}个可调试枚举", debuggable_enum_count));
         }
-        if impl_count > 0 {
-            structure_summary.push(format!("{}个实现", impl_count));
+        if trait_count > 0 {
+            structure_summary.push(format!("{}个Trait", trait_count));
+        }
+        if trait_impl_count > 0 {
+            structure_summary.push(format!("{}个Trait实现", trait_impl_count));
+        }
+        if inherent_impl_count > 0 {
+            structure_summary.push(format!("{}个固有impl实现", inherent_impl_count));
         }
         if function_count > 0 {
-            structure_summary.push(format!("{}个函数", function_count));
+            structure_summary.push(format!("{}个普通函数", function_count));
         }
-        if macro_count > 0 {
-            structure_summary.push(format!("{}个宏", macro_count));
+        if public_function_count > 0 {
+            structure_summary.push(format!("{}个公开函数", public_function_count));
+        }
+        if async_function_count > 0 {
+            structure_summary.push(format!("{}个异步函数", async_function_count));
+        }
+        if unsafe_function_count > 0 {
+            structure_summary.push(format!("{}个unsafe函数", unsafe_function_count));
+        }
+        if macro_definition_count > 0 {
+            structure_summary.push(format!("{}个宏定义", macro_definition_count));
+        }
+        if macro_invocation_count > 0 {
+            structure_summary.push(format!("{}个宏调用", macro_invocation_count));
+        }
+        if constant_count > 0 {
+            structure_summary.push(format!("{}个常量", constant_count));
+        }
+        if static_count > 0 {
+            structure_summary.push(format!("{}个静态变量", static_count));
+        }
+        if type_alias_count > 0 {
+            structure_summary.push(format!("{}个类型别名", type_alias_count));
+        }
+        if attribute_item_count > 0 {
+            structure_summary.push(format!("{}个属性标记", attribute_item_count));
+        }
+        for (ty, cnt) in other_types {
+            if cnt > 0 && ty != "unknown" {
+                structure_summary.push(format!("{}个{}", cnt, ty));
+            }
         }
 
         if !structure_summary.is_empty() {
             summary.push_str(&format!("影响了{}", structure_summary.join("、")));
         }
 
-        // 添加测试相关信息
-        if test_count > 0 {
-            summary.push_str(&format!("。包含{}个测试函数", test_count));
+        // 添加测试相关
+        if test_function_count > 0 {
+            summary.push_str(&format!("。包含{}个测试函数", test_function_count));
         }
 
-        // 添加可见性信息
+        // 可见性
         if public_items > 0 {
             summary.push_str(&format!("。其中{}个为公开项", public_items));
         }
 
-        // 添加变更类型摘要
+        // 变更类型摘要
+        summary.push_str(&format!(
+            "。共有{}个新增、{}个删除、{}个修改",
+            additions, deletions, modifications
+        ));
+
+        summary
+    }
+
+    fn generate_c_file_summary(
+        &self,
+        file_ast: &FileAst,
+        affected_nodes: &[AffectedNode],
+    ) -> String {
+        // 各类型节点统计
+        let mut struct_count = 0;
+        let mut typedef_struct_count = 0;
+        let mut union_count = 0;
+        let mut typedef_union_count = 0;
+        let mut enum_count = 0;
+        let mut typedef_enum_count = 0;
+        let mut function_count = 0;
+        let mut function_declaration_count = 0;
+        let mut main_function_count = 0;
+        let mut global_var_count = 0;
+        let mut static_global_var_count = 0;
+        let mut const_var_count = 0;
+        let mut pointer_type_count = 0;
+        let mut macro_definition_count = 0;
+        let mut conditional_macro_count = 0;
+        let mut define_macro_count = 0;
+        let mut include_count = 0;
+        let mut include_stdio_count = 0;
+        let mut include_stdlib_count = 0;
+        let mut include_string_count = 0;
+        let mut conditional_block_count = 0;
+        let mut comment_block_count = 0;
+        let mut goto_statement_count = 0;
+        let mut switch_statement_count = 0;
+        let mut case_statement_count = 0;
+        let mut for_loop_count = 0;
+        let mut while_loop_count = 0;
+        let mut do_while_loop_count = 0;
+        let mut break_statement_count = 0;
+        let mut continue_statement_count = 0;
+        let mut return_statement_count = 0;
+
+        // 变更类型
+        let mut additions = 0;
+        let mut deletions = 0;
+        let mut modifications = 0;
+
+        let mut other_types: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
+        for node in affected_nodes {
+            match node.node_type.as_str() {
+                "struct_definition" => struct_count += 1,
+                "typedef_struct" => typedef_struct_count += 1,
+                "union_definition" => union_count += 1,
+                "typedef_union" => typedef_union_count += 1,
+                "enum_definition" => enum_count += 1,
+                "typedef_enum" => typedef_enum_count += 1,
+                t if t.contains("function|main_function") => {
+                    function_count += 1;
+                    main_function_count += 1;
+                }
+                "function" => function_count += 1,
+                "function_declaration" => function_declaration_count += 1,
+                "main_function" => main_function_count += 1,
+                "global_variable" => global_var_count += 1,
+                "static_global_variable" => static_global_var_count += 1,
+                "const_variable" => const_var_count += 1,
+                "pointer_type" => pointer_type_count += 1,
+                "macro_definition" => macro_definition_count += 1,
+                "define_macro" => define_macro_count += 1,
+                "conditional_macro" => conditional_macro_count += 1,
+                "include_directive" => include_count += 1,
+                "include_stdio" => include_stdio_count += 1,
+                "include_stdlib" => include_stdlib_count += 1,
+                "include_string" => include_string_count += 1,
+                "conditional_block" => conditional_block_count += 1,
+                "comment_block" => comment_block_count += 1,
+                "goto_statement" => goto_statement_count += 1,
+                "switch_statement" => switch_statement_count += 1,
+                "case_statement" => case_statement_count += 1,
+                "for_loop" => for_loop_count += 1,
+                "while_loop" => while_loop_count += 1,
+                "do_while_loop" => do_while_loop_count += 1,
+                "break_statement" => break_statement_count += 1,
+                "continue_statement" => continue_statement_count += 1,
+                "return_statement" => return_statement_count += 1,
+                _ => *other_types.entry(node.node_type.clone()).or_insert(0) += 1,
+            }
+            if let Some(change_type) = &node.change_type {
+                match change_type.as_str() {
+                    "added" | "added_content" => additions += 1,
+                    "deleted" => deletions += 1,
+                    "modified" | "modified_with_deletion" => modifications += 1,
+                    _ => {}
+                }
+            }
+        }
+
+        let mut summary = format!("C文件 {} 变更分析：", file_ast.path.display());
+        if affected_nodes.is_empty() {
+            return format!("{}未检测到结构性变更", summary);
+        }
+
+        // 结构摘要
+        let mut structure_summary = Vec::new();
+        if struct_count > 0 {
+            structure_summary.push(format!("{}个结构体", struct_count));
+        }
+        if typedef_struct_count > 0 {
+            structure_summary.push(format!("{}个typedef结构体", typedef_struct_count));
+        }
+        if union_count > 0 {
+            structure_summary.push(format!("{}个联合体", union_count));
+        }
+        if typedef_union_count > 0 {
+            structure_summary.push(format!("{}个typedef联合体", typedef_union_count));
+        }
+        if enum_count > 0 {
+            structure_summary.push(format!("{}个枚举", enum_count));
+        }
+        if typedef_enum_count > 0 {
+            structure_summary.push(format!("{}个typedef枚举", typedef_enum_count));
+        }
+        if function_count > 0 {
+            structure_summary.push(format!("{}个函数", function_count));
+        }
+        if main_function_count > 0 {
+            structure_summary.push(format!("{}个主函数", main_function_count));
+        }
+        if function_declaration_count > 0 {
+            structure_summary.push(format!("{}个函数声明", function_declaration_count));
+        }
+        if global_var_count > 0 {
+            structure_summary.push(format!("{}个全局变量", global_var_count));
+        }
+        if static_global_var_count > 0 {
+            structure_summary.push(format!("{}个静态全局变量", static_global_var_count));
+        }
+        if const_var_count > 0 {
+            structure_summary.push(format!("{}个常量", const_var_count));
+        }
+        if pointer_type_count > 0 {
+            structure_summary.push(format!("{}个指针类型", pointer_type_count));
+        }
+        if macro_definition_count > 0 {
+            structure_summary.push(format!("{}个宏定义", macro_definition_count));
+        }
+        if define_macro_count > 0 {
+            structure_summary.push(format!("{}个#define宏", define_macro_count));
+        }
+        if conditional_macro_count > 0 {
+            structure_summary.push(format!("{}个条件宏", conditional_macro_count));
+        }
+        if include_count > 0 {
+            structure_summary.push(format!("{}个包含指令", include_count));
+        }
+        if include_stdio_count > 0 {
+            structure_summary.push(format!("{}个stdio头文件", include_stdio_count));
+        }
+        if include_stdlib_count > 0 {
+            structure_summary.push(format!("{}个stdlib头文件", include_stdlib_count));
+        }
+        if include_string_count > 0 {
+            structure_summary.push(format!("{}个string头文件", include_string_count));
+        }
+        if conditional_block_count > 0 {
+            structure_summary.push(format!("{}个条件编译块", conditional_block_count));
+        }
+        if comment_block_count > 0 {
+            structure_summary.push(format!("{}个注释块", comment_block_count));
+        }
+        if goto_statement_count > 0 {
+            structure_summary.push(format!("{}个goto语句", goto_statement_count));
+        }
+        if switch_statement_count > 0 {
+            structure_summary.push(format!("{}个switch语句", switch_statement_count));
+        }
+        if case_statement_count > 0 {
+            structure_summary.push(format!("{}个case语句", case_statement_count));
+        }
+        if for_loop_count > 0 {
+            structure_summary.push(format!("{}个for循环", for_loop_count));
+        }
+        if while_loop_count > 0 {
+            structure_summary.push(format!("{}个while循环", while_loop_count));
+        }
+        if do_while_loop_count > 0 {
+            structure_summary.push(format!("{}个do-while循环", do_while_loop_count));
+        }
+        if break_statement_count > 0 {
+            structure_summary.push(format!("{}个break语句", break_statement_count));
+        }
+        if continue_statement_count > 0 {
+            structure_summary.push(format!("{}个continue语句", continue_statement_count));
+        }
+        if return_statement_count > 0 {
+            structure_summary.push(format!("{}个return语句", return_statement_count));
+        }
+
+        // 其他类型
+        for (ty, cnt) in other_types {
+            if cnt > 0 && ty != "unknown" {
+                structure_summary.push(format!("{}个{}", cnt, ty));
+            }
+        }
+
+        if !structure_summary.is_empty() {
+            summary.push_str(&format!("影响了{}", structure_summary.join("、")));
+        }
+
+        summary.push_str(&format!(
+            "。共有{}个新增、{}个删除、{}个修改",
+            additions, deletions, modifications
+        ));
+
+        summary
+    }
+
+    fn generate_cpp_file_summary(
+        &self,
+        file_ast: &FileAst,
+        affected_nodes: &[AffectedNode],
+    ) -> String {
+        // 类型统计
+        let mut class_count = 0;
+        let mut template_class_count = 0;
+        let mut derived_class_count = 0;
+        let mut struct_count = 0;
+        let mut template_struct_count = 0;
+        let mut union_count = 0;
+        let mut enum_count = 0;
+        let mut enum_class_count = 0;
+        let mut namespace_count = 0;
+        let mut function_count = 0;
+        let mut template_function_count = 0;
+        let mut constexpr_function_count = 0;
+        let mut virtual_function_count = 0;
+        let mut override_function_count = 0;
+        let mut static_function_count = 0;
+        let mut inline_function_count = 0;
+        let mut explicit_function_count = 0;
+        let mut operator_overload_count = 0;
+        let mut lambda_count = 0;
+        let mut constructor_count = 0;
+        let mut destructor_count = 0;
+        let mut macro_definition_count = 0;
+        let mut conditional_macro_count = 0;
+        let mut define_macro_count = 0;
+        let mut typedef_declaration_count = 0;
+        let mut using_declaration_count = 0;
+        let mut friend_declaration_count = 0;
+        let mut include_count = 0;
+        let mut include_vector_count = 0;
+        let mut include_string_count = 0;
+        let mut include_map_count = 0;
+        let mut include_memory_count = 0;
+        let mut include_thread_count = 0;
+        let mut global_var_count = 0;
+        let mut static_global_var_count = 0;
+        let mut const_var_count = 0;
+        let mut conditional_block_count = 0;
+        let mut comment_block_count = 0;
+        let mut for_loop_count = 0;
+        let mut while_loop_count = 0;
+        let mut do_while_loop_count = 0;
+        let mut switch_statement_count = 0;
+        let mut case_statement_count = 0;
+        let mut break_statement_count = 0;
+        let mut continue_statement_count = 0;
+        let mut return_statement_count = 0;
+        let mut goto_statement_count = 0;
+
+        // 变更类型
+        let mut additions = 0;
+        let mut deletions = 0;
+        let mut modifications = 0;
+        let mut other_types: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
+        for node in affected_nodes {
+            match node.node_type.as_str() {
+                "class_definition" => class_count += 1,
+                "template_class" => template_class_count += 1,
+                "derived_class" => derived_class_count += 1,
+                "struct_definition" => struct_count += 1,
+                "template_struct" => template_struct_count += 1,
+                "union_definition" => union_count += 1,
+                "enum_definition" => enum_count += 1,
+                "enum_class" => enum_class_count += 1,
+                "namespace_block" => namespace_count += 1,
+                t if t.contains("function|template") => {
+                    function_count += 1;
+                    template_function_count += 1;
+                }
+                "function" => function_count += 1,
+                "template" => template_function_count += 1,
+                "constexpr" => constexpr_function_count += 1,
+                "virtual" => virtual_function_count += 1,
+                "override" => override_function_count += 1,
+                "static" => static_function_count += 1,
+                "inline" => inline_function_count += 1,
+                "explicit" => explicit_function_count += 1,
+                "operator_overload" => operator_overload_count += 1,
+                "lambda" | "lambda_expression" => lambda_count += 1,
+                "constructor" => constructor_count += 1,
+                "destructor" => destructor_count += 1,
+                "macro_definition" | "define_macro" => macro_definition_count += 1,
+                "conditional_macro" => conditional_macro_count += 1,
+                "typedef_declaration" => typedef_declaration_count += 1,
+                "using_declaration" => using_declaration_count += 1,
+                "friend_declaration" => friend_declaration_count += 1,
+                "include_directive" => include_count += 1,
+                "include_vector" => include_vector_count += 1,
+                "include_string" => include_string_count += 1,
+                "include_map" => include_map_count += 1,
+                "include_memory" => include_memory_count += 1,
+                "include_thread" => include_thread_count += 1,
+                "global_variable" => global_var_count += 1,
+                "static_global_variable" => static_global_var_count += 1,
+                "const_variable" => const_var_count += 1,
+                "conditional_block" => conditional_block_count += 1,
+                "comment_block" => comment_block_count += 1,
+                "for_loop" => for_loop_count += 1,
+                "while_loop" => while_loop_count += 1,
+                "do_while_loop" => do_while_loop_count += 1,
+                "switch_statement" => switch_statement_count += 1,
+                "case_statement" => case_statement_count += 1,
+                "break_statement" => break_statement_count += 1,
+                "continue_statement" => continue_statement_count += 1,
+                "return_statement" => return_statement_count += 1,
+                "goto_statement" => goto_statement_count += 1,
+                _ => *other_types.entry(node.node_type.clone()).or_insert(0) += 1,
+            }
+            if let Some(change_type) = &node.change_type {
+                match change_type.as_str() {
+                    "added" | "added_content" => additions += 1,
+                    "deleted" => deletions += 1,
+                    "modified" | "modified_with_deletion" => modifications += 1,
+                    _ => {}
+                }
+            }
+        }
+
+        let mut summary = format!("C++文件 {} 变更分析：", file_ast.path.display());
+        if affected_nodes.is_empty() {
+            return format!("{}未检测到结构性变更", summary);
+        }
+
+        // 结构摘要
+        let mut structure_summary = Vec::new();
+        if class_count > 0 {
+            structure_summary.push(format!("{}个类", class_count));
+        }
+        if template_class_count > 0 {
+            structure_summary.push(format!("{}个模板类", template_class_count));
+        }
+        if derived_class_count > 0 {
+            structure_summary.push(format!("{}个派生类", derived_class_count));
+        }
+        if struct_count > 0 {
+            structure_summary.push(format!("{}个结构体", struct_count));
+        }
+        if template_struct_count > 0 {
+            structure_summary.push(format!("{}个模板结构体", template_struct_count));
+        }
+        if union_count > 0 {
+            structure_summary.push(format!("{}个联合体", union_count));
+        }
+        if enum_count > 0 {
+            structure_summary.push(format!("{}个枚举", enum_count));
+        }
+        if enum_class_count > 0 {
+            structure_summary.push(format!("{}个枚举类", enum_class_count));
+        }
+        if namespace_count > 0 {
+            structure_summary.push(format!("{}个命名空间", namespace_count));
+        }
+        if function_count > 0 {
+            structure_summary.push(format!("{}个函数", function_count));
+        }
+        if template_function_count > 0 {
+            structure_summary.push(format!("{}个模板函数", template_function_count));
+        }
+        if constexpr_function_count > 0 {
+            structure_summary.push(format!("{}个constexpr函数", constexpr_function_count));
+        }
+        if virtual_function_count > 0 {
+            structure_summary.push(format!("{}个虚函数", virtual_function_count));
+        }
+        if override_function_count > 0 {
+            structure_summary.push(format!("{}个override函数", override_function_count));
+        }
+        if static_function_count > 0 {
+            structure_summary.push(format!("{}个静态函数", static_function_count));
+        }
+        if inline_function_count > 0 {
+            structure_summary.push(format!("{}个内联函数", inline_function_count));
+        }
+        if explicit_function_count > 0 {
+            structure_summary.push(format!("{}个explicit函数", explicit_function_count));
+        }
+        if operator_overload_count > 0 {
+            structure_summary.push(format!("{}个操作符重载", operator_overload_count));
+        }
+        if lambda_count > 0 {
+            structure_summary.push(format!("{}个lambda表达式", lambda_count));
+        }
+        if constructor_count > 0 {
+            structure_summary.push(format!("{}个构造函数", constructor_count));
+        }
+        if destructor_count > 0 {
+            structure_summary.push(format!("{}个析构函数", destructor_count));
+        }
+        if macro_definition_count > 0 {
+            structure_summary.push(format!("{}个宏定义", macro_definition_count));
+        }
+        if conditional_macro_count > 0 {
+            structure_summary.push(format!("{}个条件宏", conditional_macro_count));
+        }
+        if typedef_declaration_count > 0 {
+            structure_summary.push(format!("{}个typedef声明", typedef_declaration_count));
+        }
+        if using_declaration_count > 0 {
+            structure_summary.push(format!("{}个using声明", using_declaration_count));
+        }
+        if friend_declaration_count > 0 {
+            structure_summary.push(format!("{}个友元声明", friend_declaration_count));
+        }
+        if include_count > 0 {
+            structure_summary.push(format!("{}个包含指令", include_count));
+        }
+        if include_vector_count > 0 {
+            structure_summary.push(format!("{}个vector头文件", include_vector_count));
+        }
+        if include_string_count > 0 {
+            structure_summary.push(format!("{}个string头文件", include_string_count));
+        }
+        if include_map_count > 0 {
+            structure_summary.push(format!("{}个map头文件", include_map_count));
+        }
+        if include_memory_count > 0 {
+            structure_summary.push(format!("{}个memory头文件", include_memory_count));
+        }
+        if include_thread_count > 0 {
+            structure_summary.push(format!("{}个thread头文件", include_thread_count));
+        }
+        if global_var_count > 0 {
+            structure_summary.push(format!("{}个全局变量", global_var_count));
+        }
+        if static_global_var_count > 0 {
+            structure_summary.push(format!("{}个静态全局变量", static_global_var_count));
+        }
+        if const_var_count > 0 {
+            structure_summary.push(format!("{}个常量", const_var_count));
+        }
+        if conditional_block_count > 0 {
+            structure_summary.push(format!("{}个条件编译块", conditional_block_count));
+        }
+        if comment_block_count > 0 {
+            structure_summary.push(format!("{}个注释块", comment_block_count));
+        }
+        if for_loop_count > 0 {
+            structure_summary.push(format!("{}个for循环", for_loop_count));
+        }
+        if while_loop_count > 0 {
+            structure_summary.push(format!("{}个while循环", while_loop_count));
+        }
+        if do_while_loop_count > 0 {
+            structure_summary.push(format!("{}个do-while循环", do_while_loop_count));
+        }
+        if switch_statement_count > 0 {
+            structure_summary.push(format!("{}个switch语句", switch_statement_count));
+        }
+        if case_statement_count > 0 {
+            structure_summary.push(format!("{}个case语句", case_statement_count));
+        }
+        if break_statement_count > 0 {
+            structure_summary.push(format!("{}个break语句", break_statement_count));
+        }
+        if continue_statement_count > 0 {
+            structure_summary.push(format!("{}个continue语句", continue_statement_count));
+        }
+        if return_statement_count > 0 {
+            structure_summary.push(format!("{}个return语句", return_statement_count));
+        }
+        if goto_statement_count > 0 {
+            structure_summary.push(format!("{}个goto语句", goto_statement_count));
+        }
+        // 其他类型
+        for (ty, cnt) in other_types {
+            if cnt > 0 && ty != "unknown" {
+                structure_summary.push(format!("{}个{}", cnt, ty));
+            }
+        }
+
+        if !structure_summary.is_empty() {
+            summary.push_str(&format!("影响了{}", structure_summary.join("、")));
+        }
+
+        summary.push_str(&format!(
+            "。共有{}个新增、{}个删除、{}个修改",
+            additions, deletions, modifications
+        ));
+
+        summary
+    }
+
+    fn generate_python_file_summary(
+        &self,
+        file_ast: &FileAst,
+        affected_nodes: &[AffectedNode],
+    ) -> String {
+        // 类型统计
+        let mut class_def_count = 0;
+        let mut derived_class_count = 0;
+        let mut django_model_count = 0;
+        let mut function_count = 0;
+        let mut static_method_count = 0;
+        let mut class_method_count = 0;
+        let mut property_method_count = 0;
+        let mut constructor_count = 0;
+        let mut test_function_count = 0;
+        let mut std_api_count = 0;
+        let mut decorator_count = 0;
+        let mut import_count = 0;
+        let mut import_numpy_count = 0;
+        let mut import_pandas_count = 0;
+        let mut import_torch_count = 0;
+        let mut import_tensorflow_count = 0;
+        let mut import_sklearn_count = 0;
+        let mut import_requests_count = 0;
+        let mut import_flask_count = 0;
+        let mut import_django_count = 0;
+        let mut import_matplotlib_count = 0;
+        let mut import_from_count = 0;
+        let mut assignment_count = 0;
+        let mut lambda_count = 0;
+        let mut comment_block_count = 0;
+        let mut if_count = 0;
+        let mut elif_count = 0;
+        let mut else_count = 0;
+        let mut for_count = 0;
+        let mut while_count = 0;
+        let mut try_count = 0;
+        let mut except_count = 0;
+        let mut finally_count = 0;
+        let mut with_count = 0;
+        let mut return_count = 0;
+        let mut yield_count = 0;
+        let mut assert_count = 0;
+        let mut async_function_count = 0;
+        let mut await_count = 0;
+
+        // 变更类型
+        let mut additions = 0;
+        let mut deletions = 0;
+        let mut modifications = 0;
+        let mut other_types: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
+        for node in affected_nodes {
+            match node.node_type.as_str() {
+                "class_definition" => class_def_count += 1,
+                "derived_class" => derived_class_count += 1,
+                "django_model" => django_model_count += 1,
+                t if t.contains("function|staticmethod") => {
+                    function_count += 1;
+                    static_method_count += 1;
+                }
+                t if t.contains("function|classmethod") => {
+                    function_count += 1;
+                    class_method_count += 1;
+                }
+                t if t.contains("function|property") => {
+                    function_count += 1;
+                    property_method_count += 1;
+                }
+                t if t.contains("function|constructor") => {
+                    function_count += 1;
+                    constructor_count += 1;
+                }
+                t if t.contains("function|test_function") => {
+                    function_count += 1;
+                    test_function_count += 1;
+                }
+                t if t.contains("function|std_api") => {
+                    function_count += 1;
+                    std_api_count += 1;
+                }
+                "function" => function_count += 1,
+                "staticmethod" => static_method_count += 1,
+                "classmethod" => class_method_count += 1,
+                "property" => property_method_count += 1,
+                "constructor" => constructor_count += 1,
+                "test_function" => test_function_count += 1,
+                t if t.starts_with("import_numpy") => import_numpy_count += 1,
+                t if t.starts_with("import_pandas") => import_pandas_count += 1,
+                t if t.starts_with("import_torch") => import_torch_count += 1,
+                t if t.starts_with("import_tensorflow") => import_tensorflow_count += 1,
+                t if t.starts_with("import_sklearn") => import_sklearn_count += 1,
+                t if t.starts_with("import_requests") => import_requests_count += 1,
+                t if t.starts_with("import_flask") => import_flask_count += 1,
+                t if t.starts_with("import_django") => import_django_count += 1,
+                t if t.starts_with("import_matplotlib") => import_matplotlib_count += 1,
+                "import_statement" => import_count += 1,
+                "import_from_statement" => import_from_count += 1,
+                "decorator" => decorator_count += 1,
+                "assignment" => assignment_count += 1,
+                "lambda_expression" => lambda_count += 1,
+                "comment_block" => comment_block_count += 1,
+                "if_statement" => if_count += 1,
+                "elif_clause" => elif_count += 1,
+                "else_clause" => else_count += 1,
+                "for_loop" => for_count += 1,
+                "while_loop" => while_count += 1,
+                "try_statement" => try_count += 1,
+                "except_clause" => except_count += 1,
+                "finally_clause" => finally_count += 1,
+                "with_statement" => with_count += 1,
+                "return_statement" => return_count += 1,
+                "yield_statement" => yield_count += 1,
+                "assert_statement" => assert_count += 1,
+                "async_function" => async_function_count += 1,
+                "await_expression" => await_count += 1,
+                _ => *other_types.entry(node.node_type.clone()).or_insert(0) += 1,
+            }
+            if let Some(change_type) = &node.change_type {
+                match change_type.as_str() {
+                    "added" | "added_content" => additions += 1,
+                    "deleted" => deletions += 1,
+                    "modified" | "modified_with_deletion" => modifications += 1,
+                    _ => {}
+                }
+            }
+        }
+
+        let mut summary = format!("Python文件 {} 变更分析：", file_ast.path.display());
+        if affected_nodes.is_empty() {
+            return format!("{}未检测到结构性变更", summary);
+        }
+
+        // 结构摘要
+        let mut structure_summary = Vec::new();
+        if class_def_count > 0 {
+            structure_summary.push(format!("{}个类", class_def_count));
+        }
+        if derived_class_count > 0 {
+            structure_summary.push(format!("{}个派生类", derived_class_count));
+        }
+        if django_model_count > 0 {
+            structure_summary.push(format!("{}个Django模型", django_model_count));
+        }
+        if function_count > 0 {
+            structure_summary.push(format!("{}个函数", function_count));
+        }
+        if static_method_count > 0 {
+            structure_summary.push(format!("{}个静态方法", static_method_count));
+        }
+        if class_method_count > 0 {
+            structure_summary.push(format!("{}个类方法", class_method_count));
+        }
+        if property_method_count > 0 {
+            structure_summary.push(format!("{}个属性方法", property_method_count));
+        }
+        if constructor_count > 0 {
+            structure_summary.push(format!("{}个构造函数", constructor_count));
+        }
+        if test_function_count > 0 {
+            structure_summary.push(format!("{}个测试函数", test_function_count));
+        }
+        if std_api_count > 0 {
+            structure_summary.push(format!("{}个标准库API调用", std_api_count));
+        }
+        if decorator_count > 0 {
+            structure_summary.push(format!("{}个装饰器", decorator_count));
+        }
+        if import_count > 0 {
+            structure_summary.push(format!("{}个import导入", import_count));
+        }
+        if import_from_count > 0 {
+            structure_summary.push(format!("{}个from导入", import_from_count));
+        }
+        if import_numpy_count > 0 {
+            structure_summary.push(format!("{}次numpy导入", import_numpy_count));
+        }
+        if import_pandas_count > 0 {
+            structure_summary.push(format!("{}次pandas导入", import_pandas_count));
+        }
+        if import_torch_count > 0 {
+            structure_summary.push(format!("{}次torch导入", import_torch_count));
+        }
+        if import_tensorflow_count > 0 {
+            structure_summary.push(format!("{}次tensorflow导入", import_tensorflow_count));
+        }
+        if import_sklearn_count > 0 {
+            structure_summary.push(format!("{}次sklearn导入", import_sklearn_count));
+        }
+        if import_requests_count > 0 {
+            structure_summary.push(format!("{}次requests导入", import_requests_count));
+        }
+        if import_flask_count > 0 {
+            structure_summary.push(format!("{}次flask导入", import_flask_count));
+        }
+        if import_django_count > 0 {
+            structure_summary.push(format!("{}次django导入", import_django_count));
+        }
+        if import_matplotlib_count > 0 {
+            structure_summary.push(format!("{}次matplotlib导入", import_matplotlib_count));
+        }
+        if assignment_count > 0 {
+            structure_summary.push(format!("{}个赋值", assignment_count));
+        }
+        if lambda_count > 0 {
+            structure_summary.push(format!("{}个lambda表达式", lambda_count));
+        }
+        if comment_block_count > 0 {
+            structure_summary.push(format!("{}个注释块", comment_block_count));
+        }
+        if if_count > 0 {
+            structure_summary.push(format!("{}个if语句", if_count));
+        }
+        if elif_count > 0 {
+            structure_summary.push(format!("{}个elif语句", elif_count));
+        }
+        if else_count > 0 {
+            structure_summary.push(format!("{}个else语句", else_count));
+        }
+        if for_count > 0 {
+            structure_summary.push(format!("{}个for循环", for_count));
+        }
+        if while_count > 0 {
+            structure_summary.push(format!("{}个while循环", while_count));
+        }
+        if try_count > 0 {
+            structure_summary.push(format!("{}个try语句", try_count));
+        }
+        if except_count > 0 {
+            structure_summary.push(format!("{}个except语句", except_count));
+        }
+        if finally_count > 0 {
+            structure_summary.push(format!("{}个finally语句", finally_count));
+        }
+        if with_count > 0 {
+            structure_summary.push(format!("{}个with语句", with_count));
+        }
+        if return_count > 0 {
+            structure_summary.push(format!("{}个return语句", return_count));
+        }
+        if yield_count > 0 {
+            structure_summary.push(format!("{}个yield语句", yield_count));
+        }
+        if assert_count > 0 {
+            structure_summary.push(format!("{}个assert语句", assert_count));
+        }
+        if async_function_count > 0 {
+            structure_summary.push(format!("{}个异步函数", async_function_count));
+        }
+        if await_count > 0 {
+            structure_summary.push(format!("{}个await表达式", await_count));
+        }
+
+        for (ty, cnt) in other_types {
+            if cnt > 0 && ty != "unknown" {
+                structure_summary.push(format!("{}个{}", cnt, ty));
+            }
+        }
+
+        if !structure_summary.is_empty() {
+            summary.push_str(&format!("影响了{}", structure_summary.join("、")));
+        }
+
+        summary.push_str(&format!(
+            "。共有{}个新增、{}个删除、{}个修改",
+            additions, deletions, modifications
+        ));
+
+        summary
+    }
+
+    fn generate_go_file_summary(
+        &self,
+        file_ast: &FileAst,
+        affected_nodes: &[AffectedNode],
+    ) -> String {
+        // 类型统计
+        let mut package_count = 0;
+        let mut import_count = 0;
+        let mut import_fmt_count = 0;
+        let mut import_os_count = 0;
+        let mut import_io_count = 0;
+        let mut import_bufio_count = 0;
+        let mut import_net_count = 0;
+        let mut import_http_count = 0;
+        let mut import_json_count = 0;
+        let mut import_time_count = 0;
+        let mut import_context_count = 0;
+        let mut import_sync_count = 0;
+        let mut struct_def_count = 0;
+        let mut interface_def_count = 0;
+        let mut type_alias_count = 0;
+        let mut type_function_alias_count = 0;
+        let mut function_count = 0;
+        let mut method_count = 0;
+        let mut goroutine_count = 0;
+        let mut defer_count = 0;
+        let mut var_decl_count = 0;
+        let mut short_var_decl_count = 0;
+        let mut const_decl_count = 0;
+        let mut channel_type_count = 0;
+        let mut range_clause_count = 0;
+        let mut go_statement_count = 0;
+        let mut select_statement_count = 0;
+        let mut defer_statement_count = 0;
+        let mut for_loop_count = 0;
+        let mut if_count = 0;
+        let mut switch_count = 0;
+        let mut case_count = 0;
+        let mut return_count = 0;
+        let mut break_count = 0;
+        let mut continue_count = 0;
+        let mut comment_block_count = 0;
+
+        // 变更类型
+        let mut additions = 0;
+        let mut deletions = 0;
+        let mut modifications = 0;
+        let mut other_types: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
+        for node in affected_nodes {
+            match node.node_type.as_str() {
+                "package_declaration" => package_count += 1,
+                "import_declaration" => import_count += 1,
+                t if t.starts_with("import_fmt") => import_fmt_count += 1,
+                t if t.starts_with("import_os") => import_os_count += 1,
+                t if t.starts_with("import_io") => import_io_count += 1,
+                t if t.starts_with("import_bufio") => import_bufio_count += 1,
+                t if t.starts_with("import_net") => import_net_count += 1,
+                t if t.starts_with("import_http") => import_http_count += 1,
+                t if t.starts_with("import_json") => import_json_count += 1,
+                t if t.starts_with("import_time") => import_time_count += 1,
+                t if t.starts_with("import_context") => import_context_count += 1,
+                t if t.starts_with("import_sync") => import_sync_count += 1,
+                "struct_definition" => struct_def_count += 1,
+                "interface_definition" => interface_def_count += 1,
+                "type_alias" => type_alias_count += 1,
+                "type_function_alias" => type_function_alias_count += 1,
+                t if t.contains("function|method") => {
+                    function_count += 1;
+                    method_count += 1;
+                }
+                "function" => function_count += 1,
+                "method" => method_count += 1,
+                "goroutine" => goroutine_count += 1,
+                "defer" => defer_count += 1,
+                "var_declaration" => var_decl_count += 1,
+                "short_var_declaration" => short_var_decl_count += 1,
+                "const_declaration" => const_decl_count += 1,
+                "channel_type" => channel_type_count += 1,
+                "range_clause" => range_clause_count += 1,
+                "go_statement" => go_statement_count += 1,
+                "select_statement" => select_statement_count += 1,
+                "defer_statement" => defer_statement_count += 1,
+                "for_loop" => for_loop_count += 1,
+                "if_statement" => if_count += 1,
+                "switch_statement" => switch_count += 1,
+                "case_clause" => case_count += 1,
+                "return_statement" => return_count += 1,
+                "break_statement" => break_count += 1,
+                "continue_statement" => continue_count += 1,
+                "comment_block" => comment_block_count += 1,
+                _ => *other_types.entry(node.node_type.clone()).or_insert(0) += 1,
+            }
+            if let Some(change_type) = &node.change_type {
+                match change_type.as_str() {
+                    "added" | "added_content" => additions += 1,
+                    "deleted" => deletions += 1,
+                    "modified" | "modified_with_deletion" => modifications += 1,
+                    _ => {}
+                }
+            }
+        }
+
+        let mut summary = format!("Go文件 {} 变更分析：", file_ast.path.display());
+        if affected_nodes.is_empty() {
+            return format!("{}未检测到结构性变更", summary);
+        }
+
+        // 结构摘要
+        let mut structure_summary = Vec::new();
+        if package_count > 0 {
+            structure_summary.push(format!("{}个包声明", package_count));
+        }
+        if import_count > 0 {
+            structure_summary.push(format!("{}个import导入", import_count));
+        }
+        if import_fmt_count > 0 {
+            structure_summary.push(format!("{}次fmt导入", import_fmt_count));
+        }
+        if import_os_count > 0 {
+            structure_summary.push(format!("{}次os导入", import_os_count));
+        }
+        if import_io_count > 0 {
+            structure_summary.push(format!("{}次io导入", import_io_count));
+        }
+        if import_bufio_count > 0 {
+            structure_summary.push(format!("{}次bufio导入", import_bufio_count));
+        }
+        if import_net_count > 0 {
+            structure_summary.push(format!("{}次net导入", import_net_count));
+        }
+        if import_http_count > 0 {
+            structure_summary.push(format!("{}次http导入", import_http_count));
+        }
+        if import_json_count > 0 {
+            structure_summary.push(format!("{}次json导入", import_json_count));
+        }
+        if import_time_count > 0 {
+            structure_summary.push(format!("{}次time导入", import_time_count));
+        }
+        if import_context_count > 0 {
+            structure_summary.push(format!("{}次context导入", import_context_count));
+        }
+        if import_sync_count > 0 {
+            structure_summary.push(format!("{}次sync导入", import_sync_count));
+        }
+        if struct_def_count > 0 {
+            structure_summary.push(format!("{}个结构体", struct_def_count));
+        }
+        if interface_def_count > 0 {
+            structure_summary.push(format!("{}个接口", interface_def_count));
+        }
+        if type_alias_count > 0 {
+            structure_summary.push(format!("{}个类型别名", type_alias_count));
+        }
+        if type_function_alias_count > 0 {
+            structure_summary.push(format!("{}个函数类型别名", type_function_alias_count));
+        }
+        if function_count > 0 {
+            structure_summary.push(format!("{}个函数", function_count));
+        }
+        if method_count > 0 {
+            structure_summary.push(format!("{}个方法", method_count));
+        }
+        if goroutine_count > 0 {
+            structure_summary.push(format!("{}个goroutine", goroutine_count));
+        }
+        if defer_count > 0 {
+            structure_summary.push(format!("{}次defer", defer_count));
+        }
+        if var_decl_count > 0 {
+            structure_summary.push(format!("{}个变量声明", var_decl_count));
+        }
+        if short_var_decl_count > 0 {
+            structure_summary.push(format!("{}个短变量声明", short_var_decl_count));
+        }
+        if const_decl_count > 0 {
+            structure_summary.push(format!("{}个常量声明", const_decl_count));
+        }
+        if channel_type_count > 0 {
+            structure_summary.push(format!("{}个通道类型", channel_type_count));
+        }
+        if range_clause_count > 0 {
+            structure_summary.push(format!("{}个range子句", range_clause_count));
+        }
+        if go_statement_count > 0 {
+            structure_summary.push(format!("{}个go语句", go_statement_count));
+        }
+        if select_statement_count > 0 {
+            structure_summary.push(format!("{}个select语句", select_statement_count));
+        }
+        if defer_statement_count > 0 {
+            structure_summary.push(format!("{}个defer语句", defer_statement_count));
+        }
+        if for_loop_count > 0 {
+            structure_summary.push(format!("{}个for循环", for_loop_count));
+        }
+        if if_count > 0 {
+            structure_summary.push(format!("{}个if语句", if_count));
+        }
+        if switch_count > 0 {
+            structure_summary.push(format!("{}个switch语句", switch_count));
+        }
+        if case_count > 0 {
+            structure_summary.push(format!("{}个case语句", case_count));
+        }
+        if return_count > 0 {
+            structure_summary.push(format!("{}个return语句", return_count));
+        }
+        if break_count > 0 {
+            structure_summary.push(format!("{}个break语句", break_count));
+        }
+        if continue_count > 0 {
+            structure_summary.push(format!("{}个continue语句", continue_count));
+        }
+        if comment_block_count > 0 {
+            structure_summary.push(format!("{}个注释块", comment_block_count));
+        }
+        for (ty, cnt) in other_types {
+            if cnt > 0 && ty != "unknown" {
+                structure_summary.push(format!("{}个{}", cnt, ty));
+            }
+        }
+
+        if !structure_summary.is_empty() {
+            summary.push_str(&format!("影响了{}", structure_summary.join("、")));
+        }
+
+        summary.push_str(&format!(
+            "。共有{}个新增、{}个删除、{}个修改",
+            additions, deletions, modifications
+        ));
+
+        summary
+    }
+
+    fn generate_js_file_summary(
+        &self,
+        file_ast: &FileAst,
+        affected_nodes: &[AffectedNode],
+    ) -> String {
+        // 类型统计
+        let mut function_decl_count = 0;
+        let mut function_expr_count = 0;
+        let mut arrow_function_count = 0;
+        let mut class_count = 0;
+        let mut derived_class_count = 0;
+        let mut method_count = 0;
+        let mut static_method_count = 0;
+        let mut async_method_count = 0;
+        let mut variable_const_count = 0;
+        let mut variable_let_count = 0;
+        let mut variable_var_count = 0;
+        let mut import_count = 0;
+        let mut export_count = 0;
+        let mut require_count = 0;
+        let mut promise_count = 0;
+        let mut std_api_count = 0;
+        let mut await_count = 0;
+        let mut async_function_count = 0;
+        let mut template_literal_count = 0;
+        let mut object_destructuring_count = 0;
+        let mut array_destructuring_count = 0;
+        let mut try_count = 0;
+        let mut catch_count = 0;
+        let mut finally_count = 0;
+        let mut if_count = 0;
+        let mut else_count = 0;
+        let mut for_count = 0;
+        let mut while_count = 0;
+        let mut do_while_count = 0;
+        let mut switch_count = 0;
+        let mut case_count = 0;
+        let mut break_count = 0;
+        let mut continue_count = 0;
+        let mut return_count = 0;
+        let mut comment_block_count = 0;
+
+        // 变更类型
+        let mut additions = 0;
+        let mut deletions = 0;
+        let mut modifications = 0;
+        let mut other_types: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
+        for node in affected_nodes {
+            match node.node_type.as_str() {
+                "function_declaration" => function_decl_count += 1,
+                "function_expression" => function_expr_count += 1,
+                "arrow_function" => arrow_function_count += 1,
+                "class_definition" => class_count += 1,
+                "derived_class" => derived_class_count += 1,
+                t if t.starts_with("method") => method_count += 1,
+                t if t.contains("static") => static_method_count += 1,
+                t if t.contains("async") && !t.contains("function") => async_method_count += 1,
+                "const_variable" => variable_const_count += 1,
+                "let_variable" => variable_let_count += 1,
+                "var_variable" => variable_var_count += 1,
+                "import_statement" => import_count += 1,
+                "export_statement" => export_count += 1,
+                "require_call" => require_count += 1,
+                t if t.starts_with("promise") => promise_count += 1,
+                t if t.starts_with("std_api") => std_api_count += 1,
+                "await_expression" => await_count += 1,
+                "async_function" => async_function_count += 1,
+                "template_literal" => template_literal_count += 1,
+                "object_destructuring" => object_destructuring_count += 1,
+                "array_destructuring" => array_destructuring_count += 1,
+                "try_statement" => try_count += 1,
+                "catch_clause" => catch_count += 1,
+                "finally_clause" => finally_count += 1,
+                "if_statement" => if_count += 1,
+                "else_clause" => else_count += 1,
+                "for_loop" => for_count += 1,
+                "while_loop" => while_count += 1,
+                "do_while_loop" => do_while_count += 1,
+                "switch_statement" => switch_count += 1,
+                "case_clause" => case_count += 1,
+                "break_statement" => break_count += 1,
+                "continue_statement" => continue_count += 1,
+                "return_statement" => return_count += 1,
+                "comment_block" => comment_block_count += 1,
+                _ => *other_types.entry(node.node_type.clone()).or_insert(0) += 1,
+            }
+            if let Some(change_type) = &node.change_type {
+                match change_type.as_str() {
+                    "added" | "added_content" => additions += 1,
+                    "deleted" => deletions += 1,
+                    "modified" | "modified_with_deletion" => modifications += 1,
+                    _ => {}
+                }
+            }
+        }
+
+        let mut summary = format!("JavaScript文件 {} 变更分析：", file_ast.path.display());
+        if affected_nodes.is_empty() {
+            return format!("{}未检测到结构性变更", summary);
+        }
+
+        // 结构摘要
+        let mut structure_summary = Vec::new();
+        if function_decl_count > 0 {
+            structure_summary.push(format!("{}个函数声明", function_decl_count));
+        }
+        if function_expr_count > 0 {
+            structure_summary.push(format!("{}个函数表达式", function_expr_count));
+        }
+        if arrow_function_count > 0 {
+            structure_summary.push(format!("{}个箭头函数", arrow_function_count));
+        }
+        if class_count > 0 {
+            structure_summary.push(format!("{}个类", class_count));
+        }
+        if derived_class_count > 0 {
+            structure_summary.push(format!("{}个派生类", derived_class_count));
+        }
+        if method_count > 0 {
+            structure_summary.push(format!("{}个方法", method_count));
+        }
+        if static_method_count > 0 {
+            structure_summary.push(format!("{}个静态方法", static_method_count));
+        }
+        if async_method_count > 0 {
+            structure_summary.push(format!("{}个异步方法", async_method_count));
+        }
+        if variable_const_count > 0 {
+            structure_summary.push(format!("{}个const变量", variable_const_count));
+        }
+        if variable_let_count > 0 {
+            structure_summary.push(format!("{}个let变量", variable_let_count));
+        }
+        if variable_var_count > 0 {
+            structure_summary.push(format!("{}个var变量", variable_var_count));
+        }
+        if import_count > 0 {
+            structure_summary.push(format!("{}个import语句", import_count));
+        }
+        if export_count > 0 {
+            structure_summary.push(format!("{}个export语句", export_count));
+        }
+        if require_count > 0 {
+            structure_summary.push(format!("{}个require调用", require_count));
+        }
+        if promise_count > 0 {
+            structure_summary.push(format!("{}个Promise创建", promise_count));
+        }
+        if std_api_count > 0 {
+            structure_summary.push(format!("{}个标准库API调用", std_api_count));
+        }
+        if await_count > 0 {
+            structure_summary.push(format!("{}个await表达式", await_count));
+        }
+        if async_function_count > 0 {
+            structure_summary.push(format!("{}个异步函数", async_function_count));
+        }
+        if template_literal_count > 0 {
+            structure_summary.push(format!("{}个模板字符串", template_literal_count));
+        }
+        if object_destructuring_count > 0 {
+            structure_summary.push(format!("{}个对象解构", object_destructuring_count));
+        }
+        if array_destructuring_count > 0 {
+            structure_summary.push(format!("{}个数组解构", array_destructuring_count));
+        }
+        if try_count > 0 {
+            structure_summary.push(format!("{}个try语句", try_count));
+        }
+        if catch_count > 0 {
+            structure_summary.push(format!("{}个catch语句", catch_count));
+        }
+        if finally_count > 0 {
+            structure_summary.push(format!("{}个finally语句", finally_count));
+        }
+        if if_count > 0 {
+            structure_summary.push(format!("{}个if语句", if_count));
+        }
+        if else_count > 0 {
+            structure_summary.push(format!("{}个else语句", else_count));
+        }
+        if for_count > 0 {
+            structure_summary.push(format!("{}个for循环", for_count));
+        }
+        if while_count > 0 {
+            structure_summary.push(format!("{}个while循环", while_count));
+        }
+        if do_while_count > 0 {
+            structure_summary.push(format!("{}个do-while循环", do_while_count));
+        }
+        if switch_count > 0 {
+            structure_summary.push(format!("{}个switch语句", switch_count));
+        }
+        if case_count > 0 {
+            structure_summary.push(format!("{}个case语句", case_count));
+        }
+        if break_count > 0 {
+            structure_summary.push(format!("{}个break语句", break_count));
+        }
+        if continue_count > 0 {
+            structure_summary.push(format!("{}个continue语句", continue_count));
+        }
+        if return_count > 0 {
+            structure_summary.push(format!("{}个return语句", return_count));
+        }
+        if comment_block_count > 0 {
+            structure_summary.push(format!("{}个注释块", comment_block_count));
+        }
+        for (ty, cnt) in other_types {
+            if cnt > 0 && ty != "unknown" {
+                structure_summary.push(format!("{}个{}", cnt, ty));
+            }
+        }
+
+        if !structure_summary.is_empty() {
+            summary.push_str(&format!("影响了{}", structure_summary.join("、")));
+        }
+
         summary.push_str(&format!(
             "。共有{}个新增、{}个删除、{}个修改",
             additions, deletions, modifications
