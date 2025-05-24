@@ -882,52 +882,6 @@ impl TreeSitterAnalyzer {
         Ok(affected_nodes)
     }
 
-    // fn analyze_java_file_changes(&self, file_ast: &FileAst, hunks: &[DiffHunk]) -> Result<Vec<AffectedNode>, TreeSitterError> {
-    //     let mut affected_nodes = self.analyze_generic_file_changes(file_ast, hunks)?;
-    //
-    //     // Java 特定分析逻辑
-    //     let source_bytes = file_ast.source.as_bytes();
-    //
-    //     // 分析类结构变更
-    //     for node in &mut affected_nodes {
-    //         // 对类定义的特殊处理
-    //         if node.node_type == "class" {
-    //             // 标记为结构变更
-    //             node.node_type = "class_structure".to_string();
-    //
-    //             // 额外分析类中的方法和字段
-    //             if let Some(content) = &node.content {
-    //                 // 判断是否含有特定注解
-    //                 if content.contains("@Service") || content.contains("@Component") ||
-    //                    content.contains("@Controller") || content.contains("@Repository") {
-    //                     node.node_type = "spring_component".to_string();
-    //                 }
-    //
-    //                 if content.contains("@Entity") || content.contains("@Table") {
-    //                     node.node_type = "jpa_entity".to_string();
-    //                 }
-    //             }
-    //         }
-    //
-    //         // 对方法的特殊处理
-    //         if node.node_type == "method" {
-    //             // 分析方法签名变更
-    //             if let Some(content) = &node.content {
-    //                 if content.contains("@Override") {
-    //                     node.node_type = "overridden_method".to_string();
-    //                 }
-    //
-    //                 // 检查是否是API端点
-    //                 if content.contains("@GetMapping") || content.contains("@PostMapping") ||
-    //                    content.contains("@RequestMapping") {
-    //                     node.node_type = "api_endpoint".to_string();
-    //                 }
-    //             }
-    //         }
-    //     }
-    //
-    //     Ok(affected_nodes)
-    // }
     fn analyze_rust_file_changes(
         &self,
         file_ast: &FileAst,
@@ -1018,49 +972,6 @@ impl TreeSitterAnalyzer {
 
         Ok(affected_nodes)
     }
-    // fn analyze_rust_file_changes(
-    //     &self,
-    //     file_ast: &FileAst,
-    //     hunks: &[DiffHunk],
-    // ) -> Result<Vec<AffectedNode>, TreeSitterError> {
-    //     let mut affected_nodes = self.analyze_generic_file_changes(file_ast, hunks)?;
-
-    //     // Rust 特定分析逻辑
-    //     let source_bytes = file_ast.source.as_bytes();
-
-    //     for node in &mut affected_nodes {
-    //         // 对结构体的特殊处理
-    //         if node.node_type == "struct" {
-    //             // 检查是否实现了特定 trait
-    //             if let Some(content) = &node.content {
-    //                 if content.contains("impl Debug") || content.contains("#[derive(Debug") {
-    //                     node.node_type = "debuggable_struct".to_string();
-    //                 }
-
-    //                 if content.contains("pub ") {
-    //                     node.is_public = true;
-    //                 }
-    //             }
-    //         }
-
-    //         // 对函数的特殊处理
-    //         if node.node_type == "function" {
-    //             if let Some(content) = &node.content {
-    //                 // 检查是否是测试函数
-    //                 if content.contains("#[test") {
-    //                     node.node_type = "test_function".to_string();
-    //                 }
-
-    //                 // 检查是否有宏
-    //                 if content.contains("macro_rules!") {
-    //                     node.node_type = "macro".to_string();
-    //                 }
-    //             }
-    //         }
-    //     }
-
-    //     Ok(affected_nodes)
-    // }
 
     fn generate_java_file_summary(
         &self,
