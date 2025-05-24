@@ -973,6 +973,910 @@ impl TreeSitterAnalyzer {
         Ok(affected_nodes)
     }
 
+    fn analyze_c_file_changes(
+        &self,
+        file_ast: &FileAst,
+        hunks: &[DiffHunk],
+    ) -> Result<Vec<AffectedNode>, TreeSitterError> {
+        let mut affected_nodes = self.analyze_generic_file_changes(file_ast, hunks)?;
+
+        for node in &mut affected_nodes {
+            // 结构体
+            if node.node_type == "struct" {
+                node.node_type = "struct_definition".to_string();
+                if let Some(content) = &node.content {
+                    if content.contains("typedef struct") {
+                        node.node_type = "typedef_struct".to_string();
+                    }
+                }
+            }
+            // 联合体
+            if node.node_type == "union" {
+                node.node_type = "union_definition".to_string();
+                if let Some(content) = &node.content {
+                    if content.contains("typedef union") {
+                        node.node_type = "typedef_union".to_string();
+                    }
+                }
+            }
+            // 枚举
+            if node.node_type == "enum" {
+                node.node_type = "enum_definition".to_string();
+                if let Some(content) = &node.content {
+                    if content.contains("typedef enum") {
+                        node.node_type = "typedef_enum".to_string();
+                    }
+                }
+            }
+            // Typedef
+            if node.node_type == "typedef" {
+                node.node_type = "typedef_declaration".to_string();
+            }
+            // 宏定义
+            if node.node_type == "macro" {
+                if let Some(content) = &node.content {
+                    if content.contains("#ifdef")
+                        || content.contains("#ifndef")
+                        || content.contains("#if")
+                    {
+                        node.node_type = "conditional_macro".to_string();
+                    } else if content.contains("#define") {
+                        node.node_type = "define_macro".to_string();
+                    }
+                }
+            }
+            // 条件编译块
+            if node.node_type == "preproc_if"
+                || node.node_type == "preproc_elif"
+                || node.node_type == "preproc_else"
+            {
+                node.node_type = "conditional_block".to_string();
+            }
+            // 函数定义
+            if node.node_type == "function" {
+                let mut tags = vec!["function".to_string()];
+                if let Some(content) = &node.content {
+                    if content.contains("inline") {
+                        tags.push("inline".to_string());
+                    }
+                    if content.contains("static") {
+                        tags.push("static".to_string());
+                    }
+                    if content.contains("extern") {
+                        tags.push("extern".to_string());
+                    }
+                    // 检查主函数
+                    if content.contains("main(") {
+                        tags.push("main_function".to_string());
+                    }
+                    // 常见标准库API检测
+                    let std_apis = [
+                        "printf", "scanf", "malloc", "free", "memcpy", "strcpy", "strlen", "fopen",
+                        "fclose", "fread", "fwrite", "fprintf", "fscanf", "exit", "system",
+                        "getchar", "putchar", "puts", "gets", "perror", "abort",
+                    ];
+                    for api in &std_apis {
+                        if content.contains(api) {
+                            tags.push(format!("std_api:{}", api));
+                        }
+                    }
+                }
+                node.node_type = tags.join("|");
+            }
+            // 函数声明
+            if node.node_type == "declaration" {
+                if let Some(content) = &node.content {
+                    // 检测是否为函数声明
+                    if content.contains("(") && content.contains(");") {
+                        node.node_type = "function_declaration".to_string();
+                    }
+                }
+            }
+            // 全局变量
+            if node.node_type == "global_var" || node.node_type == "variable" {
+                if let Some(content) = &node.content {
+                    // 简单判断是否为全局变量
+                    if !content.contains("static")
+                        && !content.contains("const")
+                        && !content.contains("(")
+                    {
+                        node.node_type = "global_variable".to_string();
+                    } else if content.contains("static") {
+                        node.node_type = "static_global_variable".to_string();
+                    }
+                }
+            }
+            // 指针类型声明
+            if node.node_type == "pointer_declaration" {
+                node.node_type = "pointer_type".to_string();
+            }
+            // 常量声明
+            if node.node_type == "const_declaration" {
+                node.node_type = "const_variable".to_string();
+            }
+            // 文件包含
+            if node.node_type == "include" {
+                node.node_type = "include_directive".to_string();
+                if let Some(content) = &node.content {
+                    if content.contains("<stdio.h>") {
+                        node.node_type = "include_stdio".to_string();
+                    } else if content.contains("<stdlib.h>") {
+                        node.node_type = "include_stdlib".to_string();
+                    } else if content.contains("<string.h>") {
+                        node.node_type = "include_string".to_string();
+                    }
+                    // ...可根据需要继续添加常见头文件
+                }
+            }
+            // 注释块
+            if node.node_type == "comment" {
+                node.node_type = "comment_block".to_string();
+            }
+            // goto语句
+            if node.node_type == "goto_statement" {
+                node.node_type = "goto_statement".to_string();
+            }
+            // switch语句
+            if node.node_type == "switch_statement" {
+                node.node_type = "switch_statement".to_string();
+            }
+            // case语句
+            if node.node_type == "case_statement" {
+                node.node_type = "case_statement".to_string();
+            }
+            // for, while, do-while
+            if node.node_type == "for_statement" {
+                node.node_type = "for_loop".to_string();
+            }
+            if node.node_type == "while_statement" {
+                node.node_type = "while_loop".to_string();
+            }
+            if node.node_type == "do_statement" {
+                node.node_type = "do_while_loop".to_string();
+            }
+            // break/continue
+            if node.node_type == "break_statement" {
+                node.node_type = "break_statement".to_string();
+            }
+            if node.node_type == "continue_statement" {
+                node.node_type = "continue_statement".to_string();
+            }
+            // return语句
+            if node.node_type == "return_statement" {
+                node.node_type = "return_statement".to_string();
+            }
+        }
+        Ok(affected_nodes)
+    }
+
+    fn analyze_python_file_changes(
+        &self,
+        file_ast: &FileAst,
+        hunks: &[DiffHunk],
+    ) -> Result<Vec<AffectedNode>, TreeSitterError> {
+        let mut affected_nodes = self.analyze_generic_file_changes(file_ast, hunks)?;
+
+        for node in &mut affected_nodes {
+            // 类定义
+            if node.node_type == "class" {
+                node.node_type = "class_definition".to_string();
+                if let Some(content) = &node.content {
+                    // 判断是否继承
+                    if content.contains("(") && content.contains("):") {
+                        node.node_type = "derived_class".to_string();
+                    }
+                    // Django Model
+                    if content.contains("(models.Model)") {
+                        node.node_type = "django_model".to_string();
+                    }
+                }
+            }
+            // 函数/方法定义
+            if node.node_type == "function" {
+                let mut tags = vec!["function".to_string()];
+                if let Some(content) = &node.content {
+                    if content.contains("@staticmethod") {
+                        tags.push("staticmethod".to_string());
+                    }
+                    if content.contains("@classmethod") {
+                        tags.push("classmethod".to_string());
+                    }
+                    if content.contains("@property") {
+                        tags.push("property".to_string());
+                    }
+                    if content.contains("def __init__") {
+                        tags.push("constructor".to_string());
+                    }
+                    // 常用标准库API
+                    let std_apis = [
+                        "os.",
+                        "sys.",
+                        "re.",
+                        "json.",
+                        "logging.",
+                        "subprocess.",
+                        "threading.",
+                        "asyncio.",
+                        "datetime.",
+                        "open(",
+                        "print(",
+                        "len(",
+                        "range(",
+                        "map(",
+                        "zip(",
+                        "enumerate(",
+                        "filter(",
+                        "reduce(",
+                        "list(",
+                        "dict(",
+                        "set(",
+                        "tuple(",
+                    ];
+                    for api in &std_apis {
+                        if content.contains(api) {
+                            tags.push(format!("std_api:{}", api));
+                        }
+                    }
+                }
+                node.node_type = tags.join("|");
+            }
+            // 装饰器
+            if node.node_type == "decorator" {
+                node.node_type = "decorator".to_string();
+            }
+            // import 导入
+            if node.node_type == "import_statement" {
+                node.node_type = "import_statement".to_string();
+                if let Some(content) = &node.content {
+                    // 常见三方库
+                    let libs = [
+                        "numpy",
+                        "pandas",
+                        "torch",
+                        "tensorflow",
+                        "sklearn",
+                        "requests",
+                        "flask",
+                        "django",
+                        "matplotlib",
+                    ];
+                    for lib in &libs {
+                        if content.contains(lib) {
+                            node.node_type = format!("import_{}", lib);
+                        }
+                    }
+                }
+            }
+            // from ... import ...
+            if node.node_type == "import_from_statement" {
+                node.node_type = "import_from_statement".to_string();
+            }
+            // 变量
+            if node.node_type == "assignment" {
+                node.node_type = "assignment".to_string();
+            }
+            // lambda
+            if node.node_type == "lambda" {
+                node.node_type = "lambda_expression".to_string();
+            }
+            // 注释
+            if node.node_type == "comment" {
+                node.node_type = "comment_block".to_string();
+            }
+            // if/elif/else/for/while/try/except/finally/with
+            if node.node_type == "if_statement" {
+                node.node_type = "if_statement".to_string();
+            }
+            if node.node_type == "elif_clause" {
+                node.node_type = "elif_clause".to_string();
+            }
+            if node.node_type == "else_clause" {
+                node.node_type = "else_clause".to_string();
+            }
+            if node.node_type == "for_statement" {
+                node.node_type = "for_loop".to_string();
+            }
+            if node.node_type == "while_statement" {
+                node.node_type = "while_loop".to_string();
+            }
+            if node.node_type == "try_statement" {
+                node.node_type = "try_statement".to_string();
+            }
+            if node.node_type == "except_clause" {
+                node.node_type = "except_clause".to_string();
+            }
+            if node.node_type == "finally_clause" {
+                node.node_type = "finally_clause".to_string();
+            }
+            if node.node_type == "with_statement" {
+                node.node_type = "with_statement".to_string();
+            }
+            // return/yield
+            if node.node_type == "return_statement" {
+                node.node_type = "return_statement".to_string();
+            }
+            if node.node_type == "yield" {
+                node.node_type = "yield_statement".to_string();
+            }
+            // assert
+            if node.node_type == "assert_statement" {
+                node.node_type = "assert_statement".to_string();
+            }
+            // 异步
+            if node.node_type == "async_function" {
+                node.node_type = "async_function".to_string();
+            }
+            if node.node_type == "await" {
+                node.node_type = "await_expression".to_string();
+            }
+        }
+        Ok(affected_nodes)
+    }
+
+    fn analyze_go_file_changes(
+        &self,
+        file_ast: &FileAst,
+        hunks: &[DiffHunk],
+    ) -> Result<Vec<AffectedNode>, TreeSitterError> {
+        let mut affected_nodes = self.analyze_generic_file_changes(file_ast, hunks)?;
+
+        for node in &mut affected_nodes {
+            // 包声明
+            if node.node_type == "package_clause" {
+                node.node_type = "package_declaration".to_string();
+            }
+            // import
+            if node.node_type == "import_declaration" {
+                node.node_type = "import_declaration".to_string();
+                if let Some(content) = &node.content {
+                    // 常用包
+                    let pkgs = [
+                        "\"fmt\"",
+                        "\"os\"",
+                        "\"io\"",
+                        "\"bufio\"",
+                        "\"net\"",
+                        "\"http\"",
+                        "\"json\"",
+                        "\"time\"",
+                        "\"context\"",
+                        "\"sync\"",
+                    ];
+                    for pkg in &pkgs {
+                        if content.contains(pkg) {
+                            node.node_type = format!("import_{}", pkg.replace("\"", ""));
+                        }
+                    }
+                }
+            }
+            // 结构体
+            if node.node_type == "type_spec" {
+                if let Some(content) = &node.content {
+                    if content.contains("struct {") {
+                        node.node_type = "struct_definition".to_string();
+                    } else if content.contains("interface {") {
+                        node.node_type = "interface_definition".to_string();
+                    } else if content.contains("type ") && content.contains("func(") {
+                        node.node_type = "type_function_alias".to_string();
+                    } else {
+                        node.node_type = "type_alias".to_string();
+                    }
+                }
+            }
+            // 函数定义
+            if node.node_type == "function_declaration" {
+                let mut tags = vec!["function".to_string()];
+                if let Some(content) = &node.content {
+                    if content.contains("func (") {
+                        tags.push("method".to_string());
+                    }
+                    if content.contains("go ") {
+                        tags.push("goroutine".to_string());
+                    }
+                    if content.contains("defer ") {
+                        tags.push("defer".to_string());
+                    }
+                    // 常用标准库API
+                    let std_apis = [
+                        "fmt.", "os.", "io.", "bufio.", "net.", "http.", "json.", "time.",
+                        "context.", "sync.",
+                    ];
+                    for api in &std_apis {
+                        if content.contains(api) {
+                            tags.push(format!("std_api:{}", api));
+                        }
+                    }
+                }
+                node.node_type = tags.join("|");
+            }
+            // 变量声明
+            if node.node_type == "var_declaration" {
+                node.node_type = "var_declaration".to_string();
+                if let Some(content) = &node.content {
+                    if content.contains(":=") {
+                        node.node_type = "short_var_declaration".to_string();
+                    }
+                }
+            }
+            if node.node_type == "const_declaration" {
+                node.node_type = "const_declaration".to_string();
+            }
+            // 接口
+            if node.node_type == "interface_type" {
+                node.node_type = "interface_definition".to_string();
+            }
+            // 方法接收者
+            if node.node_type == "method_declaration" {
+                node.node_type = "method_declaration".to_string();
+            }
+            // 类型断言
+            if node.node_type == "type_assertion_expression" {
+                node.node_type = "type_assertion".to_string();
+            }
+            // select/goroutine
+            if node.node_type == "go_statement" {
+                node.node_type = "go_statement".to_string();
+            }
+            if node.node_type == "select_statement" {
+                node.node_type = "select_statement".to_string();
+            }
+            if node.node_type == "defer_statement" {
+                node.node_type = "defer_statement".to_string();
+            }
+            if node.node_type == "channel_type" {
+                node.node_type = "channel_type".to_string();
+            }
+            // for/range/if/switch/case
+            if node.node_type == "for_statement" {
+                node.node_type = "for_loop".to_string();
+            }
+            if node.node_type == "range_clause" {
+                node.node_type = "range_clause".to_string();
+            }
+            if node.node_type == "if_statement" {
+                node.node_type = "if_statement".to_string();
+            }
+            if node.node_type == "switch_statement" {
+                node.node_type = "switch_statement".to_string();
+            }
+            if node.node_type == "case_clause" {
+                node.node_type = "case_clause".to_string();
+            }
+            // return/break/continue
+            if node.node_type == "return_statement" {
+                node.node_type = "return_statement".to_string();
+            }
+            if node.node_type == "break_statement" {
+                node.node_type = "break_statement".to_string();
+            }
+            if node.node_type == "continue_statement" {
+                node.node_type = "continue_statement".to_string();
+            }
+            // 注释
+            if node.node_type == "comment" {
+                node.node_type = "comment_block".to_string();
+            }
+        }
+        Ok(affected_nodes)
+    }
+
+    fn analyze_javascript_file_changes(
+        &self,
+        file_ast: &FileAst,
+        hunks: &[DiffHunk],
+    ) -> Result<Vec<AffectedNode>, TreeSitterError> {
+        let mut affected_nodes = self.analyze_generic_file_changes(file_ast, hunks)?;
+
+        for node in &mut affected_nodes {
+            // 函数声明/表达式/箭头函数
+            if node.node_type == "function_declaration" {
+                node.node_type = "function_declaration".to_string();
+            }
+            if node.node_type == "function_expression" {
+                node.node_type = "function_expression".to_string();
+            }
+            if node.node_type == "arrow_function" {
+                node.node_type = "arrow_function".to_string();
+            }
+            // 类
+            if node.node_type == "class_declaration" {
+                node.node_type = "class_definition".to_string();
+                if let Some(content) = &node.content {
+                    // 判断是否继承
+                    if content.contains("extends ") {
+                        node.node_type = "derived_class".to_string();
+                    }
+                }
+            }
+            // 方法
+            if node.node_type == "method_definition" {
+                let mut tags = vec!["method".to_string()];
+                if let Some(content) = &node.content {
+                    if content.contains("static ") {
+                        tags.push("static".to_string());
+                    }
+                    if content.contains("async ") {
+                        tags.push("async".to_string());
+                    }
+                }
+                node.node_type = tags.join("|");
+            }
+            // 变量声明
+            if node.node_type == "variable_declaration" {
+                if let Some(content) = &node.content {
+                    if content.contains("const ") {
+                        node.node_type = "const_variable".to_string();
+                    } else if content.contains("let ") {
+                        node.node_type = "let_variable".to_string();
+                    } else if content.contains("var ") {
+                        node.node_type = "var_variable".to_string();
+                    }
+                }
+            }
+            // import/export
+            if node.node_type == "import_declaration" {
+                node.node_type = "import_statement".to_string();
+                if let Some(content) = &node.content {
+                    // 常见库
+                    let libs = [
+                        "react", "vue", "angular", "lodash", "moment", "axios", "express", "next",
+                        "redux",
+                    ];
+                    for lib in &libs {
+                        if content.contains(lib) {
+                            node.node_type = format!("import_{}", lib);
+                        }
+                    }
+                }
+            }
+            if node.node_type == "export_statement" {
+                node.node_type = "export_statement".to_string();
+            }
+            // require
+            if node.node_type == "call_expression" {
+                if let Some(content) = &node.content {
+                    if content.contains("require(") {
+                        node.node_type = "require_call".to_string();
+                    }
+                    // 常用标准库API或全局对象
+                    let std_apis = [
+                        "console.",
+                        "setTimeout",
+                        "setInterval",
+                        "clearTimeout",
+                        "clearInterval",
+                        "process.",
+                        "Buffer",
+                        "fs.",
+                        "path.",
+                        "http.",
+                        "fetch",
+                        "document.",
+                        "window.",
+                    ];
+                    for api in &std_apis {
+                        if content.contains(api) {
+                            node.node_type = format!("std_api:{}", api);
+                        }
+                    }
+                }
+            }
+            // 异步特性
+            if node.node_type == "await_expression" {
+                node.node_type = "await_expression".to_string();
+            }
+            if node.node_type == "async_function" {
+                node.node_type = "async_function".to_string();
+            }
+            // Promise
+            if node.node_type == "new_expression" {
+                if let Some(content) = &node.content {
+                    if content.contains("Promise(") {
+                        node.node_type = "promise_creation".to_string();
+                    }
+                }
+            }
+            // try/catch/finally
+            if node.node_type == "try_statement" {
+                node.node_type = "try_statement".to_string();
+            }
+            if node.node_type == "catch_clause" {
+                node.node_type = "catch_clause".to_string();
+            }
+            if node.node_type == "finally_clause" {
+                node.node_type = "finally_clause".to_string();
+            }
+            // if/else/for/while/switch/case/break/continue/return
+            if node.node_type == "if_statement" {
+                node.node_type = "if_statement".to_string();
+            }
+            if node.node_type == "else_clause" {
+                node.node_type = "else_clause".to_string();
+            }
+            if node.node_type == "for_statement" {
+                node.node_type = "for_loop".to_string();
+            }
+            if node.node_type == "while_statement" {
+                node.node_type = "while_loop".to_string();
+            }
+            if node.node_type == "do_statement" {
+                node.node_type = "do_while_loop".to_string();
+            }
+            if node.node_type == "switch_statement" {
+                node.node_type = "switch_statement".to_string();
+            }
+            if node.node_type == "case_clause" {
+                node.node_type = "case_clause".to_string();
+            }
+            if node.node_type == "break_statement" {
+                node.node_type = "break_statement".to_string();
+            }
+            if node.node_type == "continue_statement" {
+                node.node_type = "continue_statement".to_string();
+            }
+            if node.node_type == "return_statement" {
+                node.node_type = "return_statement".to_string();
+            }
+            // 注释
+            if node.node_type == "comment" {
+                node.node_type = "comment_block".to_string();
+            }
+            // Lambda/匿名函数
+            if node.node_type == "arrow_function" {
+                node.node_type = "arrow_function".to_string();
+            }
+            // 对象/数组解构
+            if node.node_type == "object_pattern" {
+                node.node_type = "object_destructuring".to_string();
+            }
+            if node.node_type == "array_pattern" {
+                node.node_type = "array_destructuring".to_string();
+            }
+            // 模板字符串
+            if node.node_type == "template_string" {
+                node.node_type = "template_literal".to_string();
+            }
+            // 其它可根据需求扩展
+        }
+        Ok(affected_nodes)
+    }
+
+    fn analyze_cpp_file_changes(
+        &self,
+        file_ast: &FileAst,
+        hunks: &[DiffHunk],
+    ) -> Result<Vec<AffectedNode>, TreeSitterError> {
+        let mut affected_nodes = self.analyze_generic_file_changes(file_ast, hunks)?;
+
+        for node in &mut affected_nodes {
+            // 类与结构体
+            if node.node_type == "class" {
+                node.node_type = "class_definition".to_string();
+                if let Some(content) = &node.content {
+                    // 判断是否模板类
+                    if content.contains("template") {
+                        node.node_type = "template_class".to_string();
+                    }
+                    // 判断是否继承
+                    if content.contains(": public")
+                        || content.contains(": protected")
+                        || content.contains(": private")
+                    {
+                        node.node_type = "derived_class".to_string();
+                    }
+                }
+            }
+            if node.node_type == "struct" {
+                node.node_type = "struct_definition".to_string();
+                if let Some(content) = &node.content {
+                    if content.contains("template") {
+                        node.node_type = "template_struct".to_string();
+                    }
+                }
+            }
+            // 联合体
+            if node.node_type == "union" {
+                node.node_type = "union_definition".to_string();
+            }
+            // 枚举
+            if node.node_type == "enum" {
+                node.node_type = "enum_definition".to_string();
+                if let Some(content) = &node.content {
+                    if content.contains("class") {
+                        node.node_type = "enum_class".to_string();
+                    }
+                }
+            }
+            // 命名空间
+            if node.node_type == "namespace" {
+                node.node_type = "namespace_block".to_string();
+            }
+            // 模板函数/声明
+            if node.node_type == "function" {
+                let mut tags = vec!["function".to_string()];
+                if let Some(content) = &node.content {
+                    if content.contains("template") {
+                        tags.push("template".to_string());
+                    }
+                    if content.contains("constexpr") {
+                        tags.push("constexpr".to_string());
+                    }
+                    if content.contains("virtual") {
+                        tags.push("virtual".to_string());
+                    }
+                    if content.contains("override") {
+                        tags.push("override".to_string());
+                    }
+                    if content.contains("static") {
+                        tags.push("static".to_string());
+                    }
+                    if content.contains("inline") {
+                        tags.push("inline".to_string());
+                    }
+                    if content.contains("explicit") {
+                        tags.push("explicit".to_string());
+                    }
+                    if content.contains("operator") {
+                        tags.push("operator_overload".to_string());
+                    }
+                    // Lambda 检测
+                    if content.contains("[](")
+                        || content.contains("[&](")
+                        || content.contains("[=](")
+                    {
+                        tags.push("lambda".to_string());
+                    }
+                    // 构造/析构函数
+                    if content.contains("~") {
+                        tags.push("destructor".to_string());
+                    } else {
+                        // 构造函数名称和类名一致
+                        if content.contains(&node.name) {
+                            tags.push("constructor".to_string());
+                        }
+                    }
+
+                    // 常用C++标准库API检测
+                    let std_apis = [
+                        "std::vector",
+                        "std::string",
+                        "std::map",
+                        "std::unordered_map",
+                        "std::set",
+                        "std::unique_ptr",
+                        "std::shared_ptr",
+                        "std::make_shared",
+                        "std::thread",
+                        "std::async",
+                        "std::function",
+                        "std::move",
+                        "std::swap",
+                        "std::sort",
+                        "std::cout",
+                        "std::cin",
+                        "std::cerr",
+                        "std::endl",
+                    ];
+                    for api in &std_apis {
+                        if content.contains(api) {
+                            tags.push(format!("std_api:{}", api));
+                        }
+                    }
+                }
+                node.node_type = tags.join("|");
+            }
+            // Lambda 表达式（有的 AST 可能单独标记）
+            if node.node_type == "lambda_expression" {
+                node.node_type = "lambda_expression".to_string();
+            }
+            // 操作符重载
+            if node.node_type == "operator_function" {
+                node.node_type = "operator_overload".to_string();
+            }
+            // 友元
+            if node.node_type == "friend" {
+                node.node_type = "friend_declaration".to_string();
+            }
+            // Typedef/Using
+            if node.node_type == "typedef" {
+                node.node_type = "typedef_declaration".to_string();
+            }
+            if node.node_type == "using_declaration" {
+                node.node_type = "using_declaration".to_string();
+            }
+            // 宏
+            if node.node_type == "macro" {
+                if let Some(content) = &node.content {
+                    if content.contains("#define") {
+                        node.node_type = "define_macro".to_string();
+                    } else if content.contains("#ifdef")
+                        || content.contains("#ifndef")
+                        || content.contains("#if")
+                    {
+                        node.node_type = "conditional_macro".to_string();
+                    }
+                }
+            }
+            // 条件编译块
+            if node.node_type == "preproc_if"
+                || node.node_type == "preproc_elif"
+                || node.node_type == "preproc_else"
+            {
+                node.node_type = "conditional_block".to_string();
+            }
+            // include
+            if node.node_type == "include" {
+                node.node_type = "include_directive".to_string();
+                if let Some(content) = &node.content {
+                    if content.contains("<vector>") {
+                        node.node_type = "include_vector".to_string();
+                    } else if content.contains("<string>") {
+                        node.node_type = "include_string".to_string();
+                    } else if content.contains("<map>") {
+                        node.node_type = "include_map".to_string();
+                    } else if content.contains("<memory>") {
+                        node.node_type = "include_memory".to_string();
+                    } else if content.contains("<thread>") {
+                        node.node_type = "include_thread".to_string();
+                    }
+                    // 可继续添加常用头文件
+                }
+            }
+            // 注释
+            if node.node_type == "comment" {
+                node.node_type = "comment_block".to_string();
+            }
+            // 全局变量
+            if node.node_type == "global_var" || node.node_type == "variable" {
+                if let Some(content) = &node.content {
+                    if !content.contains("static")
+                        && !content.contains("const")
+                        && !content.contains("(")
+                    {
+                        node.node_type = "global_variable".to_string();
+                    } else if content.contains("static") {
+                        node.node_type = "static_global_variable".to_string();
+                    }
+                }
+            }
+            // 常量声明
+            if node.node_type == "const_declaration" {
+                node.node_type = "const_variable".to_string();
+            }
+            // Goto, switch, case, loop, break, continue, return
+            if node.node_type == "goto_statement" {
+                node.node_type = "goto_statement".to_string();
+            }
+            if node.node_type == "switch_statement" {
+                node.node_type = "switch_statement".to_string();
+            }
+            if node.node_type == "case_statement" {
+                node.node_type = "case_statement".to_string();
+            }
+            if node.node_type == "for_statement" {
+                node.node_type = "for_loop".to_string();
+            }
+            if node.node_type == "while_statement" {
+                node.node_type = "while_loop".to_string();
+            }
+            if node.node_type == "do_statement" {
+                node.node_type = "do_while_loop".to_string();
+            }
+            if node.node_type == "break_statement" {
+                node.node_type = "break_statement".to_string();
+            }
+            if node.node_type == "continue_statement" {
+                node.node_type = "continue_statement".to_string();
+            }
+            if node.node_type == "return_statement" {
+                node.node_type = "return_statement".to_string();
+            }
+            // 其它可以根据需求继续扩展
+        }
+
+        Ok(affected_nodes)
+    }
+
     fn generate_java_file_summary(
         &self,
         file_ast: &FileAst,
